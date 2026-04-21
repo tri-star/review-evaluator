@@ -6,7 +6,9 @@ from typing import Any
 class SummaryRenderService:
     """Render GitHub issue and Slack summary texts from aggregate data."""
 
-    def render_issue_body(self, daily_summary: dict[str, Any], weekly_summary: dict[str, Any] | None) -> str:
+    def render_issue_body(
+        self, daily_summary: dict[str, Any], weekly_summary: dict[str, Any] | None
+    ) -> str:
         """Render the GitHub issue markdown body from aggregate summaries.
 
         Args:
@@ -46,7 +48,9 @@ class SummaryRenderService:
             )
         return "\n".join(lines) + "\n"
 
-    def render_slack_text(self, daily_summary: dict[str, Any], weekly_summary: dict[str, Any] | None) -> str:
+    def render_slack_text(
+        self, daily_summary: dict[str, Any], weekly_summary: dict[str, Any] | None
+    ) -> str:
         """Render a plain text Slack message from aggregate summaries.
 
         Args:

@@ -1,0 +1,17 @@
+minimum_pre_commit_version: "3.0.0"
+
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-format
+        name: ruff format
+        entry: uv run --project src/review_evaluator ruff format src/review_evaluator
+        language: system
+        pass_filenames: false
+        files: ^src/review_evaluator/.*\.py$
+      - id: ruff-check
+        name: ruff check
+        entry: uv run --project src/review_evaluator ruff check --fix src/review_evaluator
+        language: system
+        pass_filenames: false
+        files: ^src/review_evaluator/.*\.py$

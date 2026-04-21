@@ -50,14 +50,19 @@ class ReviewEvaluationService:
             Evaluated records such as
             ``[{"pr_number": 1, "evaluation_status": "success", "labels": ["ai-eval:success"]}]``.
         """
-        return [self.evaluate_review(review=review, evaluated_at=evaluated_at) for review in reviews]
+        return [
+            self.evaluate_review(review=review, evaluated_at=evaluated_at)
+            for review in reviews
+        ]
 
-    def evaluate_review(self, review: dict[str, Any], evaluated_at: str) -> dict[str, Any]:
+    def evaluate_review(
+        self, review: dict[str, Any], evaluated_at: str
+    ) -> dict[str, Any]:
         """Evaluate a single review record using PR labels.
 
         Args:
             review: Review result record such as
-                ``{"repo": "owner/repo", "pr_number": 1, "head_sha": "abc", "run_at": "...", "verdict": "mergeable"}``.
+                ``{"repo": "owner/repo", "pr_number": 1, "run_at": "...", "verdict": "mergeable"}``.
             evaluated_at: Evaluation timestamp in ISO 8601 format such as
                 ``"2026-04-16T06:00:00+00:00"``.
 
@@ -65,7 +70,9 @@ class ReviewEvaluationService:
             An evaluation record such as
             ``{"evaluation_status": "success", "missed_issue": False, "false_positive": False}``.
         """
-        labels = self._fetch_label_names(repo=review["repo"], pr_number=int(review["pr_number"]))
+        labels = self._fetch_label_names(
+            repo=review["repo"], pr_number=int(review["pr_number"])
+        )
         if "ai-eval:success" in labels:
             evaluation_status = "success"
         elif "ai-eval:failure" in labels:
@@ -76,7 +83,7 @@ class ReviewEvaluationService:
         return {
             "repo": review["repo"],
             "pr_number": review["pr_number"],
-            "head_sha": review["head_sha"],
+            "head_sha": review.get("head_sha"),
             "review_run_at": review["run_at"],
             "evaluated_at": evaluated_at,
             "verdict": review["verdict"],
@@ -104,7 +111,9 @@ class ReviewEvaluationService:
             A daily summary such as
             ``{"date": "2026-04-16", "mergeable": {"precision": 1.0}, "excluded_runs": 0}``.
         """
-        evaluated = [item for item in evaluations if item["evaluation_status"] != "excluded"]
+        evaluated = [
+            item for item in evaluations if item["evaluation_status"] != "excluded"
+        ]
         mergeable = [item for item in evaluated if item["verdict"] == "mergeable"]
         human_review = [item for item in evaluated if item["verdict"] == "human-review"]
 
@@ -116,8 +125,12 @@ class ReviewEvaluationService:
             "excluded_runs": len(evaluations) - len(evaluated),
             "mergeable": self.summarize_verdict(mergeable),
             "human_review": self.summarize_verdict(human_review),
-            "missed_issue_count": sum(1 for item in evaluations if item["missed_issue"]),
-            "false_positive_count": sum(1 for item in evaluations if item["false_positive"]),
+            "missed_issue_count": sum(
+                1 for item in evaluations if item["missed_issue"]
+            ),
+            "false_positive_count": sum(
+                1 for item in evaluations if item["false_positive"]
+            ),
         }
 
     def build_weekly_summary(
@@ -138,7 +151,9 @@ class ReviewEvaluationService:
             ``{"week": "2026-W17", "mergeable": {"precision": 0.75}}``.
         """
         iso_year, iso_week, _ = datetime.fromisoformat(target_date).isocalendar()
-        daily = self.build_daily_summary(repo=repo, target_date=target_date, evaluations=evaluations)
+        daily = self.build_daily_summary(
+            repo=repo, target_date=target_date, evaluations=evaluations
+        )
         return {
             "repo": repo,
             "week": f"{iso_year}-W{iso_week:02d}",
@@ -165,7 +180,12 @@ class ReviewEvaluationService:
         failure = sum(1 for item in items if item["evaluation_status"] == "failure")
         total = len(items)
         precision = success / total if total else 0
-        return {"total": total, "success": success, "failure": failure, "precision": precision}
+        return {
+            "total": total,
+            "success": success,
+            "failure": failure,
+            "precision": precision,
+        }
 
     def _fetch_label_names(self, repo: str, pr_number: int) -> list[str]:
         """Fetch PR label names using the configured GitHub client.

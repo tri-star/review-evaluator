@@ -1,10 +1,9 @@
 -- Replace ${DATABASE_NAME} and ${S3_BUCKET} before execution.
+-- Review JSON must be stored as JSON Lines (one object per file line).
+-- Raw review objects currently keep repo/pr_number/run_at in the S3 path rather than
+-- the JSON body, so the review table exposes only body fields plus Hive partitions.
 
 CREATE EXTERNAL TABLE IF NOT EXISTS `${DATABASE_NAME}`.ai_pr_reviews (
-  repo string,
-  pr_number int,
-  head_sha string,
-  run_at string,
   verdict string,
   confidence double,
   reasons array<string>,

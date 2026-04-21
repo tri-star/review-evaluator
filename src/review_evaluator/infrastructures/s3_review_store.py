@@ -1,8 +1,16 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date, datetime, timedelta
 from typing import Any
+
+
+REVIEW_KEY_PATTERN = re.compile(
+    r"^reviews/repo_partition=(?P<repo_partition>[^/]+)/year=(?P<year>\d{4})/"
+    r"month=(?P<month>\d{2})/day=(?P<day>\d{2})/pr=(?P<pr_number>\d+)/"
+    r"run=(?P<run_at>[^/]+)\.json$"
+)
 
 
 class S3ReviewStore:
@@ -33,10 +41,13 @@ class S3ReviewStore:
             ``[{"repo": "owner/repo", "pr_number": 1, "verdict": "mergeable"}]``.
         """
         year, month, day = target_date.split("-")
-        prefix = f"reviews/repo={repo.replace('/', '_')}/year={year}/month={month}/day={day}/"
-        return self._load_json_objects(prefix=prefix)
+        prefix = f"reviews/repo_partition={repo.replace('/', '_')}/year={year}/month={month}/day={day}/"
+        items = self._load_json_objects(prefix=prefix)
+        return [self._normalize_review_item(item=item) for item in items]
 
-    def load_weekly_evaluations(self, repo: str, end_date: date) -> list[dict[str, Any]]:
+    def load_weekly_evaluations(
+        self, repo: str, end_date: date
+    ) -> list[dict[str, Any]]:
         """Load evaluation JSON files for the last seven days from S3.
 
         Args:
@@ -53,7 +64,7 @@ class S3ReviewStore:
             year = target.strftime("%Y")
             month = target.strftime("%m")
             day = target.strftime("%d")
-            prefix = f"evaluations/repo={repo_key}/year={year}/month={month}/day={day}/"
+            prefix = f"evaluations/repo_partition={repo_key}/year={year}/month={month}/day={day}/"
             evaluations.extend(self._load_json_objects(prefix=prefix))
         return evaluations
 
@@ -67,12 +78,17 @@ class S3ReviewStore:
         Returns:
             None. The JSON file is written to the `evaluations/` prefix.
         """
-        evaluated_at = datetime.fromisoformat(item["evaluated_at"].replace("Z", "+00:00"))
+        evaluated_at = datetime.fromisoformat(
+            item["evaluated_at"].replace("Z", "+00:00")
+        )
         year = evaluated_at.strftime("%Y")
         month = evaluated_at.strftime("%m")
         day = evaluated_at.strftime("%d")
         repo_key = item["repo"].replace("/", "_")
-        key = f"evaluations/repo={repo_key}/year={year}/month={month}/day={day}/pr={item['pr_number']}.json"
+        key = (
+            f"evaluations/repo_partition={repo_key}/year={year}/month={month}/day={day}/"
+            f"pr={item['pr_number']}.json"
+        )
         self.s3_client.put_object(
             Bucket=self.bucket,
             Key=key,
@@ -80,7 +96,9 @@ class S3ReviewStore:
             ContentType="application/json",
         )
 
-    def write_summary(self, summary: dict[str, Any], period: str, key_name: str) -> None:
+    def write_summary(
+        self, summary: dict[str, Any], period: str, key_name: str
+    ) -> None:
         """Write a daily or weekly summary JSON file to S3.
 
         Args:
@@ -93,9 +111,9 @@ class S3ReviewStore:
         """
         repo_key = summary["repo"].replace("/", "_")
         if period == "daily":
-            key = f"aggregates/daily/repo={repo_key}/date={key_name}/summary.json"
+            key = f"aggregates/daily/repo_partition={repo_key}/date={key_name}/summary.json"
         else:
-            key = f"aggregates/weekly/repo={repo_key}/week={key_name}/summary.json"
+            key = f"aggregates/weekly/repo_partition={repo_key}/week={key_name}/summary.json"
         self.s3_client.put_object(
             Bucket=self.bucket,
             Key=key,
@@ -116,6 +134,41 @@ class S3ReviewStore:
         items: list[dict[str, Any]] = []
         for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
             for content in page.get("Contents", []):
-                body = self.s3_client.get_object(Bucket=self.bucket, Key=content["Key"])["Body"].read().decode("utf-8")
-                items.append(json.loads(body))
+                key = content["Key"]
+                body = (
+                    self.s3_client.get_object(Bucket=self.bucket, Key=key)["Body"]
+                    .read()
+                    .decode("utf-8")
+                )
+                for line in body.splitlines():
+                    if not line.strip():
+                        continue
+                    payload = json.loads(line)
+                    payload["s3_key"] = key
+                    items.append(payload)
         return items
+
+    def _normalize_review_item(self, item: dict[str, Any]) -> dict[str, Any]:
+        """Fill missing review fields from the S3 object key.
+
+        Args:
+            item: Raw review payload loaded from S3, including ``s3_key`` metadata.
+
+        Returns:
+            A normalized review payload with repo, pr_number, and run_at populated.
+        """
+        normalized = dict(item)
+        key = normalized.pop("s3_key", "")
+        match = REVIEW_KEY_PATTERN.match(key)
+        if match is None:
+            return normalized
+
+        normalized.setdefault(
+            "repo", match.group("repo_partition").replace("_", "/", 1)
+        )
+        normalized.setdefault("pr_number", int(match.group("pr_number")))
+        run_at = match.group("run_at").replace("Z", "+00:00")
+        if len(run_at) >= 19 and run_at[13] == "-" and run_at[16] == "-":
+            run_at = run_at[:13] + ":" + run_at[14:16] + ":" + run_at[17:]
+        normalized.setdefault("run_at", run_at)
+        return normalized
