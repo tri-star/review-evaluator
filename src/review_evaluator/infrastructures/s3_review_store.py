@@ -64,7 +64,7 @@ class S3ReviewStore:
             year = target.strftime("%Y")
             month = target.strftime("%m")
             day = target.strftime("%d")
-            prefix = f"evaluations/repo={repo_key}/year={year}/month={month}/day={day}/"
+            prefix = f"evaluations/repo_partition={repo_key}/year={year}/month={month}/day={day}/"
             evaluations.extend(self._load_json_objects(prefix=prefix))
         return evaluations
 
@@ -85,7 +85,10 @@ class S3ReviewStore:
         month = evaluated_at.strftime("%m")
         day = evaluated_at.strftime("%d")
         repo_key = item["repo"].replace("/", "_")
-        key = f"evaluations/repo={repo_key}/year={year}/month={month}/day={day}/pr={item['pr_number']}.json"
+        key = (
+            f"evaluations/repo_partition={repo_key}/year={year}/month={month}/day={day}/"
+            f"pr={item['pr_number']}.json"
+        )
         self.s3_client.put_object(
             Bucket=self.bucket,
             Key=key,
@@ -108,9 +111,9 @@ class S3ReviewStore:
         """
         repo_key = summary["repo"].replace("/", "_")
         if period == "daily":
-            key = f"aggregates/daily/repo={repo_key}/date={key_name}/summary.json"
+            key = f"aggregates/daily/repo_partition={repo_key}/date={key_name}/summary.json"
         else:
-            key = f"aggregates/weekly/repo={repo_key}/week={key_name}/summary.json"
+            key = f"aggregates/weekly/repo_partition={repo_key}/week={key_name}/summary.json"
         self.s3_client.put_object(
             Bucket=self.bucket,
             Key=key,
