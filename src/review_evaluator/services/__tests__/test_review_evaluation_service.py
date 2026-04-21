@@ -34,7 +34,11 @@ def test_失敗ラベルと補助ラベルがある場合は_failure_と補助�
     github_api_stub.set_pr_labels(
         repo="owner/repo",
         pr_number=102,
-        labels=["ai-eval:failure", "ai-review:missed-issue", "ai-review:false-positive"],
+        labels=[
+            "ai-eval:failure",
+            "ai-review:missed-issue",
+            "ai-review:false-positive",
+        ],
     )
     service = ReviewEvaluationService(github_api_client=github_api_stub)
 

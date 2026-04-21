@@ -36,7 +36,9 @@ class S3ReviewStore:
         prefix = f"reviews/repo={repo.replace('/', '_')}/year={year}/month={month}/day={day}/"
         return self._load_json_objects(prefix=prefix)
 
-    def load_weekly_evaluations(self, repo: str, end_date: date) -> list[dict[str, Any]]:
+    def load_weekly_evaluations(
+        self, repo: str, end_date: date
+    ) -> list[dict[str, Any]]:
         """Load evaluation JSON files for the last seven days from S3.
 
         Args:
@@ -67,7 +69,9 @@ class S3ReviewStore:
         Returns:
             None. The JSON file is written to the `evaluations/` prefix.
         """
-        evaluated_at = datetime.fromisoformat(item["evaluated_at"].replace("Z", "+00:00"))
+        evaluated_at = datetime.fromisoformat(
+            item["evaluated_at"].replace("Z", "+00:00")
+        )
         year = evaluated_at.strftime("%Y")
         month = evaluated_at.strftime("%m")
         day = evaluated_at.strftime("%d")
@@ -80,7 +84,9 @@ class S3ReviewStore:
             ContentType="application/json",
         )
 
-    def write_summary(self, summary: dict[str, Any], period: str, key_name: str) -> None:
+    def write_summary(
+        self, summary: dict[str, Any], period: str, key_name: str
+    ) -> None:
         """Write a daily or weekly summary JSON file to S3.
 
         Args:
@@ -116,6 +122,12 @@ class S3ReviewStore:
         items: list[dict[str, Any]] = []
         for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
             for content in page.get("Contents", []):
-                body = self.s3_client.get_object(Bucket=self.bucket, Key=content["Key"])["Body"].read().decode("utf-8")
+                body = (
+                    self.s3_client.get_object(Bucket=self.bucket, Key=content["Key"])[
+                        "Body"
+                    ]
+                    .read()
+                    .decode("utf-8")
+                )
                 items.append(json.loads(body))
         return items
