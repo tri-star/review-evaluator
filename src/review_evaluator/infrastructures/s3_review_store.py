@@ -1,8 +1,16 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date, datetime, timedelta
 from typing import Any
+
+
+REVIEW_KEY_PATTERN = re.compile(
+    r"^reviews/repo_partition=(?P<repo_partition>[^/]+)/year=(?P<year>\d{4})/"
+    r"month=(?P<month>\d{2})/day=(?P<day>\d{2})/pr=(?P<pr_number>\d+)/"
+    r"run=(?P<run_at>[^/]+)\.json$"
+)
 
 
 class S3ReviewStore:
@@ -33,8 +41,9 @@ class S3ReviewStore:
             ``[{"repo": "owner/repo", "pr_number": 1, "verdict": "mergeable"}]``.
         """
         year, month, day = target_date.split("-")
-        prefix = f"reviews/repo={repo.replace('/', '_')}/year={year}/month={month}/day={day}/"
-        return self._load_json_objects(prefix=prefix)
+        prefix = f"reviews/repo_partition={repo.replace('/', '_')}/year={year}/month={month}/day={day}/"
+        items = self._load_json_objects(prefix=prefix)
+        return [self._normalize_review_item(item=item) for item in items]
 
     def load_weekly_evaluations(
         self, repo: str, end_date: date
@@ -122,12 +131,35 @@ class S3ReviewStore:
         items: list[dict[str, Any]] = []
         for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
             for content in page.get("Contents", []):
+                key = content["Key"]
                 body = (
-                    self.s3_client.get_object(Bucket=self.bucket, Key=content["Key"])[
-                        "Body"
-                    ]
+                    self.s3_client.get_object(Bucket=self.bucket, Key=key)["Body"]
                     .read()
                     .decode("utf-8")
                 )
-                items.append(json.loads(body))
+                payload = json.loads(body)
+                payload["s3_key"] = key
+                items.append(payload)
         return items
+
+    def _normalize_review_item(self, item: dict[str, Any]) -> dict[str, Any]:
+        """Fill missing review fields from the S3 object key.
+
+        Args:
+            item: Raw review payload loaded from S3, including ``s3_key`` metadata.
+
+        Returns:
+            A normalized review payload with repo, pr_number, and run_at populated.
+        """
+        normalized = dict(item)
+        key = normalized.pop("s3_key", "")
+        match = REVIEW_KEY_PATTERN.match(key)
+        if match is None:
+            return normalized
+
+        normalized.setdefault(
+            "repo", match.group("repo_partition").replace("_", "/", 1)
+        )
+        normalized.setdefault("pr_number", int(match.group("pr_number")))
+        normalized.setdefault("run_at", match.group("run_at").replace("Z", "+00:00"))
+        return normalized
