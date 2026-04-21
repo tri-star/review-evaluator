@@ -1,0 +1,115 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Review evaluator Lambda and related infrastructure.
+
+Parameters:
+  AppName:
+    Type: String
+    Default: review-evaluator
+  CreateReviewDataBucket:
+    Type: String
+    AllowedValues:
+      - "true"
+      - "false"
+    Default: "false"
+  ReviewDataBucketName:
+    Type: String
+    Default: ""
+    Description: Existing bucket name, or managed bucket name when CreateReviewDataBucket=true.
+  IntegrationsSecretArn:
+    Type: String
+    Default: ""
+    Description: ARN of Secrets Manager secret containing `github/pat` and `slack/webhook-url`.
+  SummaryIssueNumber:
+    Type: String
+    Default: ""
+  RepoFullName:
+    Type: String
+    Default: ""
+    Description: owner/repo
+  AthenaWorkGroupName:
+    Type: String
+    Default: ""
+    Description: Optional external Athena workgroup name.
+  AthenaDatabaseName:
+    Type: String
+    Default: ""
+    Description: Optional external Athena/Glue database name.
+  AthenaResultsBucketArn:
+    Type: String
+    Default: ""
+    Description: Optional external Athena results bucket ARN.
+
+Conditions:
+  UseManagedBucket: !Equals [!Ref CreateReviewDataBucket, "true"]
+  HasManagedBucketName: !And
+    - !Condition UseManagedBucket
+    - !Not [!Equals [!Ref ReviewDataBucketName, ""]]
+  HasIntegrationsSecret: !Not [!Equals [!Ref IntegrationsSecretArn, ""]]
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 120
+    MemorySize: 256
+    Architectures:
+      - x86_64
+    Environment:
+      Variables:
+        REVIEW_DATA_BUCKET: !If
+          - UseManagedBucket
+          - !Ref ReviewDataBucket
+          - !Ref ReviewDataBucketName
+        REPO_FULL_NAME: !Ref RepoFullName
+        SUMMARY_ISSUE_NUMBER: !Ref SummaryIssueNumber
+        ATHENA_WORKGROUP_NAME: !Ref AthenaWorkGroupName
+        ATHENA_DATABASE_NAME: !Ref AthenaDatabaseName
+        ATHENA_RESULTS_BUCKET_ARN: !Ref AthenaResultsBucketArn
+
+Resources:
+  ReviewDataBucket:
+    Type: AWS::S3::Bucket
+    Condition: UseManagedBucket
+    Properties:
+      BucketName: !If [HasManagedBucketName, !Ref ReviewDataBucketName, !Ref "AWS::NoValue"]
+      VersioningConfiguration:
+        Status: Enabled
+
+  ReviewEvaluatorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/review_evaluator/
+      Handler: app.lambda_handler
+      Description: Evaluate AI review results and publish daily summaries.
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !If
+              - UseManagedBucket
+              - !Ref ReviewDataBucket
+              - !Ref ReviewDataBucketName
+        - Statement:
+            - !If
+              - HasIntegrationsSecret
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref IntegrationsSecretArn
+              - !Ref AWS::NoValue
+      Environment:
+        Variables:
+          INTEGRATIONS_SECRET_ARN: !Ref IntegrationsSecretArn
+      Events:
+        DailySchedule:
+          Type: ScheduleV2
+          Properties:
+            ScheduleExpression: cron(0 21 * * ? *)
+            ScheduleExpressionTimezone: Asia/Tokyo
+
+Outputs:
+  ReviewEvaluatorFunctionArn:
+    Value: !GetAtt ReviewEvaluatorFunction.Arn
+  ReviewDataBucketOutput:
+    Value: !If
+      - UseManagedBucket
+      - !Ref ReviewDataBucket
+      - !Ref ReviewDataBucketName

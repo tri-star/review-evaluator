@@ -1,0 +1,25 @@
+version = 0.1
+
+[dev.global.parameters]
+region = "ap-southeast-1"
+
+[dev.build.parameters]
+cached = true
+parallel = true
+
+[dev.deploy.parameters]
+stack_name = "dev-review-evaluator"
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+resolve_s3 = true
+parameter_overrides = [
+  "AppName=dev-review-evaluator",
+  "CreateReviewDataBucket=false",
+  "ReviewDataBucketName=dev-review-evaluator-data-955192521523-ap-southeast-1",
+  "RepoFullName=tri-star/tasche",
+  "SummaryIssueNumber=12",
+  "AthenaWorkGroupName=dev-review-evaluator",
+  "AthenaDatabaseName=dev_review_evaluator",
+  "AthenaResultsBucketArn=arn:aws:s3:::dev-review-evaluator-data-955192521523-ap-southeast-1",
+  "IntegrationsSecretArn=arn:aws:secretsmanager:ap-southeast-1:955192521523:secret:dev-review-evaluator-secrets-NFkXPJ"
+]
