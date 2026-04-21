@@ -27,10 +27,46 @@ packages/review-evaluator/
 ## 依存性管理
 
 関数単位で `uv` を利用する。
+作業時は関数ディレクトリへ移動してからコマンドを実行する。
+
+```bash
+cd src/review_evaluator
+uv sync --dev
+```
+
+pre-commit を利用する場合は、リポジトリルートで次を一度だけ実行する。
+
+```bash
+uv run --project src/review_evaluator pre-commit install
+```
+
 SAM ビルド用の `requirements.txt` が必要な場合は、関数ディレクトリで次を実行する。
 
 ```bash
+cd src/review_evaluator
 uv export --frozen --no-dev --no-hashes -o requirements.txt
+```
+
+## フォーマットとLint
+
+Python コードのフォーマットには Ruff を利用する。
+
+```bash
+cd src/review_evaluator
+uv run ruff format .
+```
+
+Lint を実行する場合は次を使う。
+
+```bash
+cd src/review_evaluator
+uv run ruff check .
+```
+
+commit 前に同じチェックを自動実行したい場合は pre-commit を使う。
+
+```bash
+uv run --project src/review_evaluator pre-commit run --all-files
 ```
 
 ## ローカルテスト
@@ -38,6 +74,7 @@ uv export --frozen --no-dev --no-hashes -o requirements.txt
 サービス層のメインロジックはローカルでテストできるようにする。
 
 ```bash
+cd src/review_evaluator
 uv run pytest
 ```
 
