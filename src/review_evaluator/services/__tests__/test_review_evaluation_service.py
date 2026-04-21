@@ -75,6 +75,29 @@ def test_評価ラベルが無い場合は_excluded_になる() -> None:
     assert result["evaluation_status"] == "excluded"
 
 
+def test_head_shaが無いreviewでも評価できる() -> None:
+    github_api_stub = GitHubApiStub()
+    github_api_stub.set_pr_labels(
+        repo="owner/repo",
+        pr_number=104,
+        labels=["ai-eval:success"],
+    )
+    service = ReviewEvaluationService(github_api_client=github_api_stub)
+
+    result = service.evaluate_review(
+        review={
+            "repo": "owner/repo",
+            "pr_number": 104,
+            "run_at": "2026-04-16T04:00:00+00:00",
+            "verdict": "mergeable",
+        },
+        evaluated_at="2026-04-16T06:00:00+00:00",
+    )
+
+    assert result["evaluation_status"] == "success"
+    assert result["head_sha"] is None
+
+
 def test_日次サマリで_precision_と件数を集計できる() -> None:
     service = ReviewEvaluationService(github_api_client=None)
     evaluations = [

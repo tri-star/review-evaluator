@@ -62,7 +62,7 @@ class ReviewEvaluationService:
 
         Args:
             review: Review result record such as
-                ``{"repo": "owner/repo", "pr_number": 1, "head_sha": "abc", "run_at": "...", "verdict": "mergeable"}``.
+                ``{"repo": "owner/repo", "pr_number": 1, "run_at": "...", "verdict": "mergeable"}``.
             evaluated_at: Evaluation timestamp in ISO 8601 format such as
                 ``"2026-04-16T06:00:00+00:00"``.
 
@@ -83,7 +83,7 @@ class ReviewEvaluationService:
         return {
             "repo": review["repo"],
             "pr_number": review["pr_number"],
-            "head_sha": review["head_sha"],
+            "head_sha": review.get("head_sha"),
             "review_run_at": review["run_at"],
             "evaluated_at": evaluated_at,
             "verdict": review["verdict"],
