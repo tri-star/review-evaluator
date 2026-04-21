@@ -38,13 +38,12 @@ uv export --frozen --no-dev --no-hashes -o requirements.txt
 サービス層のメインロジックはローカルでテストできるようにする。
 
 ```bash
-cd packages/review-evaluator/src/review_evaluator
 uv run pytest
 ```
 
 ## dev デプロイ
 
-`packages/review-evaluator/samconfig.toml` の `dev` 環境に、非秘匿のパラメータを固定で定義する。
+`samconfig.toml` の `dev` 環境に、非秘匿のパラメータを固定で定義する。
 実際のリポジトリ名、Issue 番号、Athena 関連リソース、Secrets Manager の ARN は deploy 前に置き換える。
 
 ### Secrets Manager
@@ -65,7 +64,6 @@ Lambda には secret の中身を直接渡さず、`IntegrationsSecretArn` だ�
 ### デプロイ手順
 
 ```bash
-cd packages/review-evaluator
 sam validate --config-env dev
 sam build --config-env dev
 sam deploy --config-env dev
@@ -74,6 +72,5 @@ sam deploy --config-env dev
 変更セットだけ確認したい場合は次を使う。
 
 ```bash
-cd packages/review-evaluator
 sam deploy --config-env dev --no-execute-changeset
 ```
