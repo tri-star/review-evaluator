@@ -1,0 +1,9 @@
+{
+  "chat.tools.terminal.autoApprove": {
+    "uv lock": true,
+    "uv run ruff format .": true,
+    "uv run ruff check .": true,
+    "uv run pytest": true,
+    "sam validate --config-env": true
+  }
+}
