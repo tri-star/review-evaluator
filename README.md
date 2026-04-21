@@ -78,6 +78,16 @@ cd src/review_evaluator
 uv run pytest
 ```
 
+## S3 データ契約
+
+- review result は `reviews/repo_partition={owner_repo}/year={YYYY}/month={MM}/day={DD}/pr={PR_NUMBER}/run={RUN_AT}.json` に保存される
+- evaluation result は `evaluations/repo_partition={owner_repo}/year={YYYY}/month={MM}/day={DD}/pr={PR_NUMBER}.json` に保存される
+- daily / weekly summary は `aggregates/daily/repo_partition={owner_repo}/...` と `aggregates/weekly/repo_partition={owner_repo}/...` に保存される
+- Lambda は review JSON 本文に `repo`, `pr_number`, `run_at` が無い場合、S3 キーから補完して評価処理へ渡す
+- `head_sha` は任意項目として扱う。将来的に厳密な照合が必要なら upstream 側で本文へ含める
+
+Athena 用の raw review JSON は JSON Lines を前提とする。整形済み JSON が混在すると OpenX JSON SerDe でクエリエラーになる。
+
 ## dev デプロイ
 
 `samconfig.toml` の `dev` 環境に、非秘匿のパラメータを固定で定義する。
