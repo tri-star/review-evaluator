@@ -51,7 +51,7 @@ def test_reviews_読込時に_s3_key_から不足項目を補完できる() -> N
         {
             "repo": "tri-star/tasche",
             "pr_number": 13,
-            "run_at": "2026-04-20T14-32-22+00:00",
+            "run_at": "2026-04-20T14:32:22+00:00",
             "verdict": "human-review",
             "confidence": 0.99,
             "reasons": [],
@@ -75,7 +75,7 @@ def test_s3_key正規化ヘルパーが_repo_pr_run_at_を補完できる() -> N
     assert result == {
         "repo": "tri-star/tasche",
         "pr_number": 13,
-        "run_at": "2026-04-20T14-32-22+00:00",
+        "run_at": "2026-04-20T14:32:22+00:00",
         "verdict": "human-review",
     }
 
@@ -105,6 +105,41 @@ def test_reviews_json内に既存値があればそれを優先する() -> None:
             "run_at": "2026-04-20T14:32:22Z",
             "verdict": "mergeable",
         }
+    ]
+
+
+def test_reviews_json_lines形式を複数行と空行込みで読める() -> None:
+    key = (
+        "reviews/repo_partition=tri-star_tasche/year=2026/month=04/day=20/"
+        "pr=13/run=2026-04-20T14-32-22Z.json"
+    )
+    s3_client = FakeS3Client(
+        objects={
+            key: (
+                '{"verdict": "human-review"}\n'
+                "\n"
+                '{"verdict": "mergeable", "run_at": "2026-04-20T15:00:00Z"}\n'
+            )
+        },
+        pages=[{"Contents": [{"Key": key}]}],
+    )
+    store = S3ReviewStore(s3_client=s3_client, bucket="bucket")
+
+    result = store.load_review_results(repo="tri-star/tasche", target_date="2026-04-20")
+
+    assert result == [
+        {
+            "repo": "tri-star/tasche",
+            "pr_number": 13,
+            "run_at": "2026-04-20T14:32:22+00:00",
+            "verdict": "human-review",
+        },
+        {
+            "repo": "tri-star/tasche",
+            "pr_number": 13,
+            "run_at": "2026-04-20T15:00:00Z",
+            "verdict": "mergeable",
+        },
     ]
 
 

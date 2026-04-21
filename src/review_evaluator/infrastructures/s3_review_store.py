@@ -140,9 +140,12 @@ class S3ReviewStore:
                     .read()
                     .decode("utf-8")
                 )
-                payload = json.loads(body)
-                payload["s3_key"] = key
-                items.append(payload)
+                for line in body.splitlines():
+                    if not line.strip():
+                        continue
+                    payload = json.loads(line)
+                    payload["s3_key"] = key
+                    items.append(payload)
         return items
 
     def _normalize_review_item(self, item: dict[str, Any]) -> dict[str, Any]:
@@ -164,5 +167,8 @@ class S3ReviewStore:
             "repo", match.group("repo_partition").replace("_", "/", 1)
         )
         normalized.setdefault("pr_number", int(match.group("pr_number")))
-        normalized.setdefault("run_at", match.group("run_at").replace("Z", "+00:00"))
+        run_at = match.group("run_at").replace("Z", "+00:00")
+        if len(run_at) >= 19 and run_at[13] == "-" and run_at[16] == "-":
+            run_at = run_at[:13] + ":" + run_at[14:16] + ":" + run_at[17:]
+        normalized.setdefault("run_at", run_at)
         return normalized
