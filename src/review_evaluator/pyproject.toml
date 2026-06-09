@@ -3,7 +3,9 @@ name = "review-evaluator"
 version = "0.1.0"
 description = "Lambda package for AI review daily evaluation."
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+  "pyjwt[crypto]>=2.10.1",
+]
 
 [dependency-groups]
 dev = [

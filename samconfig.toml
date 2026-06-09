@@ -17,6 +17,7 @@ parameter_overrides = [
   "CreateReviewDataBucket=false",
   "ReviewDataBucketName=dev-review-evaluator-data-955192521523-ap-southeast-1",
   "RepoFullName=tri-star/tasche",
+  "BotName=tasche-review",
   "SummaryIssueNumber=12",
   "AthenaWorkGroupName=dev-review-evaluator",
   "AthenaDatabaseName=dev_review_evaluator",

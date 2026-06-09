@@ -101,12 +101,30 @@ secret 名の例は `review-evaluator/dev/integrations`。
 ```json
 {
   "github/pat": "ghp_xxx",
+  "github/app-id": "123456",
+  "github/app-private-key": "-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----",
+  "github/webhook-secret": "github-app-webhook-secret",
   "slack/webhook-url": "https://hooks.slack.com/services/xxx/yyy/zzz"
 }
 ```
 
 Lambda には secret の中身を直接渡さず、`IntegrationsSecretArn` だけを SAM パラメータとして渡す。
 実行時に Lambda が Secrets Manager から値を取得する。
+
+`github/pat` と `slack/webhook-url` は日次集計 Lambda が利用する。
+`github/app-id`、`github/app-private-key`、`github/webhook-secret` は GitHub App webhook の `/review` コマンド用 Lambda が利用する。
+
+### GitHub App webhook
+
+SAM の `ReviewCommandWebhookUrl` output を GitHub App の Webhook URL に設定する。
+GitHub App は Issue comment event を subscribe し、次の repository permissions を付与する。
+
+- Issues: Read & Write
+- Pull requests: Read
+- Actions: Write
+- Repository administration: Read
+
+Issue comment に `@<BotName> /review` または `@<BotName> review` が投稿されると、対象 PR の情報を inputs として `.github/workflows/pr-ai-review.yml` の `workflow_dispatch` を実行する。
 
 ### デプロイ手順
 
