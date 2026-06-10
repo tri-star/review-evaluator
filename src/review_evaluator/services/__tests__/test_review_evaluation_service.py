@@ -162,3 +162,113 @@ def test_週次サマリで_iso_week_を含む() -> None:
 
     assert summary["week"] == "2026-W17"
     assert summary["mergeable"]["precision"] == 1.0
+
+
+def test_期間サマリで_label_と期間を含めて集計できる() -> None:
+    service = ReviewEvaluationService(github_api_client=None)
+
+    summary = service.build_period_summary(
+        repo="owner/repo",
+        label="Last 7 days",
+        start_date="2026-04-14",
+        end_date="2026-04-20",
+        evaluations=[
+            {
+                "verdict": "mergeable",
+                "evaluation_status": "success",
+                "missed_issue": False,
+                "false_positive": False,
+            },
+            {
+                "verdict": "human-review",
+                "evaluation_status": "failure",
+                "missed_issue": True,
+                "false_positive": False,
+            },
+            {
+                "verdict": "mergeable",
+                "evaluation_status": "excluded",
+                "missed_issue": False,
+                "false_positive": True,
+            },
+        ],
+    )
+
+    assert summary["label"] == "Last 7 days"
+    assert summary["start_date"] == "2026-04-14"
+    assert summary["end_date"] == "2026-04-20"
+    assert summary["review_runs"] == 3
+    assert summary["evaluated_runs"] == 2
+    assert summary["excluded_runs"] == 1
+    assert summary["mergeable"]["precision"] == 1.0
+    assert summary["human_review"]["precision"] == 0.0
+    assert summary["missed_issue_count"] == 1
+    assert summary["false_positive_count"] == 1
+
+
+def test_daily_summary群から期間サマリを再集計できる() -> None:
+    service = ReviewEvaluationService(github_api_client=None)
+
+    summary = service.build_period_summary_from_daily_summaries(
+        repo="owner/repo",
+        label="All-time",
+        daily_summaries=[
+            {
+                "review_runs": 3,
+                "evaluated_runs": 2,
+                "excluded_runs": 1,
+                "mergeable": {
+                    "total": 2,
+                    "success": 1,
+                    "failure": 1,
+                    "precision": 0.5,
+                },
+                "human_review": {
+                    "total": 0,
+                    "success": 0,
+                    "failure": 0,
+                    "precision": 0,
+                },
+                "missed_issue_count": 1,
+                "false_positive_count": 0,
+            },
+            {
+                "review_runs": 2,
+                "evaluated_runs": 2,
+                "excluded_runs": 0,
+                "mergeable": {
+                    "total": 1,
+                    "success": 1,
+                    "failure": 0,
+                    "precision": 1.0,
+                },
+                "human_review": {
+                    "total": 1,
+                    "success": 0,
+                    "failure": 1,
+                    "precision": 0.0,
+                },
+                "missed_issue_count": 0,
+                "false_positive_count": 1,
+            },
+        ],
+    )
+
+    assert summary["label"] == "All-time"
+    assert summary["review_runs"] == 5
+    assert summary["evaluated_runs"] == 4
+    assert summary["excluded_runs"] == 1
+    assert summary["mergeable"] == {
+        "total": 3,
+        "success": 2,
+        "failure": 1,
+        "precision": 2 / 3,
+    }
+    assert summary["human_review"] == {
+        "total": 1,
+        "success": 0,
+        "failure": 1,
+        "precision": 0.0,
+    }
+    assert summary["missed_issue_count"] == 1
+    assert summary["false_positive_count"] == 1
