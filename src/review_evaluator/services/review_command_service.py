@@ -110,13 +110,14 @@ class ReviewCommandService:
     ) -> dict[str, str]:
         head = pull_request["head"]
         base = pull_request["base"]
+        head_repo = head.get("repo") or {}
         return {
             "pr_number": str(pr_number),
             "head_sha": str(head["sha"]),
             "base_sha": str(base["sha"]),
             "head_ref": str(head["ref"]),
             "base_ref": str(base["ref"]),
-            "head_repo": str(head["repo"]["full_name"]),
+            "head_repo": str(head_repo.get("full_name") or ""),
             "pr_title": str(pull_request["title"]),
             "pr_author": str(pull_request["user"]["login"]),
         }

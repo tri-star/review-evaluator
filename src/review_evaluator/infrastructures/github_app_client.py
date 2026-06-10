@@ -47,12 +47,17 @@ class GitHubAppClient:
     def fetch_collaborator_permission(
         self, repo: str, username: str, installation_id: int
     ) -> str:
-        payload = self._request_json(
-            "GET",
-            f"/repos/{repo}/collaborators/{username}/permission",
-            token=self._installation_token(installation_id),
-            expected_statuses={200},
-        )
+        try:
+            payload = self._request_json(
+                "GET",
+                f"/repos/{repo}/collaborators/{username}/permission",
+                token=self._installation_token(installation_id),
+                expected_statuses={200},
+            )
+        except GitHubApiError as error:
+            if error.status == 404:
+                return "none"
+            raise
         return str(payload.get("permission", "none"))
 
     def fetch_pull_request(
@@ -157,8 +162,16 @@ class GitHubAppClient:
         except urllib.error.HTTPError as error:
             status = error.code
             body = error.read().decode("utf-8")
+        except urllib.error.URLError as error:
+            raise GitHubApiError(
+                status=502,
+                message=f"GitHub API network error: {error.reason}",
+            ) from error
         if status not in expected_statuses:
-            raise GitHubApiError(status=status, message=f"GitHub API failed: {status}")
+            raise GitHubApiError(
+                status=status,
+                message=f"GitHub API failed: {status}. Response: {body}",
+            )
         if not body:
             return {}
         return json.loads(body)

@@ -137,6 +137,27 @@ def test_sufficient_permission_dispatches_workflow_then_posts_start_comment() ->
     assert "AI review を開始しました" in client.calls[-1][3]
 
 
+def test_workflow_inputs_tolerate_deleted_head_repository() -> None:
+    service = ReviewCommandService(
+        github_client=FakeGitHubClient(), bot_name="review-bot"
+    )
+    pull_request = FakeGitHubClient().fetch_pull_request(
+        repo="owner/repo", pr_number=123, installation_id=42
+    )
+    pull_request["head"]["repo"] = None
+
+    assert service._workflow_inputs(pr_number=123, pull_request=pull_request) == {
+        "pr_number": "123",
+        "head_sha": "head123",
+        "base_sha": "base456",
+        "head_ref": "feature/review",
+        "base_ref": "main",
+        "head_repo": "",
+        "pr_title": "Add feature",
+        "pr_author": "alice",
+    }
+
+
 def _payload(body: str, action: str = "created") -> dict[str, Any]:
     return {
         "action": action,
