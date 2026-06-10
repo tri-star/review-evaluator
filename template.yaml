@@ -19,7 +19,11 @@ Parameters:
   IntegrationsSecretArn:
     Type: String
     Default: ""
-    Description: ARN of Secrets Manager secret containing `github/pat` and `slack/webhook-url`.
+    Description: ARN of Secrets Manager secret containing GitHub, Slack, and webhook integration values.
+  BotName:
+    Type: String
+    Default: review-bot
+    Description: GitHub bot login without @ used for review commands.
   SummaryIssueNumber:
     Type: String
     Default: ""
@@ -105,6 +109,32 @@ Resources:
             ScheduleExpression: cron(0 21 * * ? *)
             ScheduleExpressionTimezone: Asia/Tokyo
 
+  ReviewCommandFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/review_evaluator/
+      Handler: app.handle_review_command
+      Description: Handle GitHub App issue comment review commands.
+      Policies:
+        - Statement:
+            - !If
+              - HasIntegrationsSecret
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref IntegrationsSecretArn
+              - !Ref AWS::NoValue
+      Environment:
+        Variables:
+          INTEGRATIONS_SECRET_ARN: !Ref IntegrationsSecretArn
+          BOT_NAME: !Ref BotName
+      Events:
+        ReviewCommandWebhook:
+          Type: HttpApi
+          Properties:
+            Path: /github/review-command
+            Method: POST
+
 Outputs:
   ReviewEvaluatorFunctionArn:
     Value: !GetAtt ReviewEvaluatorFunction.Arn
@@ -113,3 +143,5 @@ Outputs:
       - UseManagedBucket
       - !Ref ReviewDataBucket
       - !Ref ReviewDataBucketName
+  ReviewCommandWebhookUrl:
+    Value: !Sub "https://${ServerlessHttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/github/review-command"
