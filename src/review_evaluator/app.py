@@ -65,7 +65,7 @@ def _handle_review_command(
     if not app_id or not private_key:
         raise RuntimeError("Missing GitHub App credentials in integrations secret")
 
-    bot_name = os.getenv("BOT_NAME", "tasche-review")
+    bot_name = os.getenv("BOT_NAME", "review-bot")
     github_client = client_factory(app_id=app_id, private_key=private_key)
     service = ReviewCommandService(github_client=github_client, bot_name=bot_name)
 

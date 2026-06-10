@@ -58,9 +58,9 @@ class FakeGitHubClient:
 
 def test_non_created_action_is_ignored_without_github_api_calls() -> None:
     client = FakeGitHubClient()
-    service = ReviewCommandService(github_client=client, bot_name="tasche-review")
+    service = ReviewCommandService(github_client=client, bot_name="review-bot")
 
-    result = service.handle(_payload(body="@tasche-review /review", action="edited"))
+    result = service.handle(_payload(body="@review-bot /review", action="edited"))
 
     assert result == {"ignored": True, "reason": "unsupported_action"}
     assert client.calls == []
@@ -68,8 +68,8 @@ def test_non_created_action_is_ignored_without_github_api_calls() -> None:
 
 def test_non_pr_issue_comment_is_ignored_without_github_api_calls() -> None:
     client = FakeGitHubClient()
-    service = ReviewCommandService(github_client=client, bot_name="tasche-review")
-    payload = _payload(body="@tasche-review /review")
+    service = ReviewCommandService(github_client=client, bot_name="review-bot")
+    payload = _payload(body="@review-bot /review")
     payload["issue"].pop("pull_request")
 
     result = service.handle(payload)
@@ -80,9 +80,9 @@ def test_non_pr_issue_comment_is_ignored_without_github_api_calls() -> None:
 
 def test_command_mismatch_is_ignored_without_github_api_calls() -> None:
     client = FakeGitHubClient()
-    service = ReviewCommandService(github_client=client, bot_name="tasche-review")
+    service = ReviewCommandService(github_client=client, bot_name="review-bot")
 
-    result = service.handle(_payload(body="@tasche-review help"))
+    result = service.handle(_payload(body="@review-bot help"))
 
     assert result == {"ignored": True, "reason": "command_mismatch"}
     assert client.calls == []
@@ -90,18 +90,18 @@ def test_command_mismatch_is_ignored_without_github_api_calls() -> None:
 
 def test_review_command_matches_with_or_without_slash_case_insensitively() -> None:
     service = ReviewCommandService(
-        github_client=FakeGitHubClient(), bot_name="tasche-review"
+        github_client=FakeGitHubClient(), bot_name="review-bot"
     )
 
-    assert service._matches_review_command("@tasche-review /review")
-    assert service._matches_review_command("@TASCHE-review review")
+    assert service._matches_review_command("@review-bot /review")
+    assert service._matches_review_command("@REVIEW-bot review")
 
 
 def test_insufficient_permission_posts_warning_and_does_not_dispatch() -> None:
     client = FakeGitHubClient(permission="read")
-    service = ReviewCommandService(github_client=client, bot_name="tasche-review")
+    service = ReviewCommandService(github_client=client, bot_name="review-bot")
 
-    result = service.handle(_payload(body="@tasche-review /review"))
+    result = service.handle(_payload(body="@review-bot /review"))
 
     assert result == {"ignored": True, "reason": "insufficient_permission"}
     assert ("dispatch_review_workflow",) not in client.calls
@@ -111,9 +111,9 @@ def test_insufficient_permission_posts_warning_and_does_not_dispatch() -> None:
 
 def test_sufficient_permission_dispatches_workflow_then_posts_start_comment() -> None:
     client = FakeGitHubClient(permission="maintain")
-    service = ReviewCommandService(github_client=client, bot_name="tasche-review")
+    service = ReviewCommandService(github_client=client, bot_name="review-bot")
 
-    result = service.handle(_payload(body="@tasche-review review"))
+    result = service.handle(_payload(body="@review-bot review"))
 
     assert result == {"ignored": False, "dispatched": True}
     dispatch_call = client.calls[-2]

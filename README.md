@@ -124,7 +124,8 @@ GitHub App は Issue comment event を subscribe し、次の repository permiss
 - Actions: Write
 - Repository administration: Read
 
-Issue comment に `@<BotName> /review` または `@<BotName> review` が投稿されると、対象 PR の情報を inputs として `.github/workflows/pr-ai-review.yml` の `workflow_dispatch` を実行する。
+Issue comment に `@review-bot /review` または `@review-bot review` が投稿されると、対象 PR の情報を inputs として `.github/workflows/pr-ai-review.yml` の `workflow_dispatch` を実行する。
+`BotName` パラメータを上書きすると、別の mention 名でも運用できる。
 
 ### デプロイ手順
 

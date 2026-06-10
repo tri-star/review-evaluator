@@ -22,7 +22,7 @@ Parameters:
     Description: ARN of Secrets Manager secret containing GitHub, Slack, and webhook integration values.
   BotName:
     Type: String
-    Default: tasche-review
+    Default: review-bot
     Description: GitHub bot login without @ used for review commands.
   SummaryIssueNumber:
     Type: String

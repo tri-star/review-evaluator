@@ -84,9 +84,9 @@ class FailingClient(FakeClient):
 def test_valid_signature_accepts_request(monkeypatch: Any) -> None:
     FakeClient.instances = []
     monkeypatch.setenv("INTEGRATIONS_SECRET_ARN", "arn")
-    monkeypatch.setenv("BOT_NAME", "tasche-review")
+    monkeypatch.setenv("BOT_NAME", "review-bot")
     response = app._handle_review_command(
-        event=_event(_payload("@tasche-review /review")),
+        event=_event(_payload("@review-bot /review")),
         secret_store=FakeSecretStore(),
         client_factory=FakeClient,
     )
@@ -99,7 +99,7 @@ def test_valid_signature_accepts_request(monkeypatch: Any) -> None:
 def test_invalid_signature_returns_401(monkeypatch: Any) -> None:
     FakeClient.instances = []
     monkeypatch.setenv("INTEGRATIONS_SECRET_ARN", "arn")
-    event = _event(_payload("@tasche-review /review"))
+    event = _event(_payload("@review-bot /review"))
     event["headers"]["X-Hub-Signature-256"] = "sha256=bad"
 
     response = app._handle_review_command(
@@ -115,7 +115,7 @@ def test_invalid_signature_returns_401(monkeypatch: Any) -> None:
 def test_missing_signature_returns_401(monkeypatch: Any) -> None:
     FakeClient.instances = []
     monkeypatch.setenv("INTEGRATIONS_SECRET_ARN", "arn")
-    event = _event(_payload("@tasche-review /review"))
+    event = _event(_payload("@review-bot /review"))
     event["headers"] = {}
 
     response = app._handle_review_command(
@@ -130,10 +130,10 @@ def test_missing_signature_returns_401(monkeypatch: Any) -> None:
 
 def test_github_api_failure_returns_sanitized_error(monkeypatch: Any) -> None:
     monkeypatch.setenv("INTEGRATIONS_SECRET_ARN", "arn")
-    monkeypatch.setenv("BOT_NAME", "tasche-review")
+    monkeypatch.setenv("BOT_NAME", "review-bot")
 
     response = app._handle_review_command(
-        event=_event(_payload("@tasche-review /review")),
+        event=_event(_payload("@review-bot /review")),
         secret_store=FakeSecretStore(),
         client_factory=FailingClient,
     )
