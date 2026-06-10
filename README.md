@@ -78,6 +78,12 @@ cd src/review_evaluator
 uv run pytest
 ```
 
+## 日次通知
+
+AI Review Daily Summary は、前日分のレビュー評価を日次集計として保存し、GitHub Issue と Slack に通知する。
+通知本文には、日次集計に加えて直近7日間と通算の集計も含める。
+直近7日間は evaluation result から、通算は保存済み daily summary から通知用に都度計算し、追加の aggregate JSON としては保存しない。
+
 ## S3 データ契約
 
 - review result は `reviews/repo_partition={owner_repo}/year={YYYY}/month={MM}/day={DD}/pr={PR_NUMBER}/run={RUN_AT}.json` に保存される

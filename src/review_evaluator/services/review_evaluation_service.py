@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from collections.abc import Iterable
 from typing import Any, Protocol
 
 
@@ -111,26 +112,10 @@ class ReviewEvaluationService:
             A daily summary such as
             ``{"date": "2026-04-16", "mergeable": {"precision": 1.0}, "excluded_runs": 0}``.
         """
-        evaluated = [
-            item for item in evaluations if item["evaluation_status"] != "excluded"
-        ]
-        mergeable = [item for item in evaluated if item["verdict"] == "mergeable"]
-        human_review = [item for item in evaluated if item["verdict"] == "human-review"]
-
         return {
             "repo": repo,
             "date": target_date,
-            "review_runs": len(evaluations),
-            "evaluated_runs": len(evaluated),
-            "excluded_runs": len(evaluations) - len(evaluated),
-            "mergeable": self.summarize_verdict(mergeable),
-            "human_review": self.summarize_verdict(human_review),
-            "missed_issue_count": sum(
-                1 for item in evaluations if item["missed_issue"]
-            ),
-            "false_positive_count": sum(
-                1 for item in evaluations if item["false_positive"]
-            ),
+            **self.summarize_evaluations(evaluations=evaluations),
         }
 
     def build_weekly_summary(
@@ -166,6 +151,108 @@ class ReviewEvaluationService:
             "false_positive_count": daily["false_positive_count"],
         }
 
+    def build_period_summary(
+        self,
+        repo: str,
+        label: str,
+        evaluations: list[dict[str, Any]],
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> dict[str, Any]:
+        """Build an aggregate summary for a named reporting period.
+
+        Args:
+            repo: Repository full name such as ``"owner/repo"``.
+            label: Human-readable period label such as ``"Last 7 days"``.
+            evaluations: Evaluation records gathered across the period.
+            start_date: Optional inclusive start date such as ``"2026-04-14"``.
+            end_date: Optional inclusive end date such as ``"2026-04-20"``.
+
+        Returns:
+            A period summary such as
+            ``{"label": "All-time", "mergeable": {"precision": 0.75}}``.
+        """
+        return {
+            "repo": repo,
+            "label": label,
+            "start_date": start_date,
+            "end_date": end_date,
+            **self.summarize_evaluations(evaluations=evaluations),
+        }
+
+    def build_period_summary_from_daily_summaries(
+        self,
+        repo: str,
+        label: str,
+        daily_summaries: list[dict[str, Any]],
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> dict[str, Any]:
+        """Build a named period summary from stored daily summaries.
+
+        Args:
+            repo: Repository full name such as ``"owner/repo"``.
+            label: Human-readable period label such as ``"All-time"``.
+            daily_summaries: Daily aggregate summaries loaded from storage.
+            start_date: Optional inclusive start date such as ``"2026-04-14"``.
+            end_date: Optional inclusive end date such as ``"2026-04-20"``.
+
+        Returns:
+            A period summary such as
+            ``{"label": "All-time", "mergeable": {"precision": 0.75}}``.
+        """
+        mergeable = self.summarize_summary_verdicts(
+            summary["mergeable"] for summary in daily_summaries
+        )
+        human_review = self.summarize_summary_verdicts(
+            summary["human_review"] for summary in daily_summaries
+        )
+        return {
+            "repo": repo,
+            "label": label,
+            "start_date": start_date,
+            "end_date": end_date,
+            "review_runs": sum(summary["review_runs"] for summary in daily_summaries),
+            "evaluated_runs": sum(
+                summary["evaluated_runs"] for summary in daily_summaries
+            ),
+            "excluded_runs": sum(
+                summary["excluded_runs"] for summary in daily_summaries
+            ),
+            "mergeable": mergeable,
+            "human_review": human_review,
+            "missed_issue_count": sum(
+                summary["missed_issue_count"] for summary in daily_summaries
+            ),
+            "false_positive_count": sum(
+                summary["false_positive_count"] for summary in daily_summaries
+            ),
+        }
+
+    def summarize_evaluations(
+        self, evaluations: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        """Summarize common metrics from evaluation records."""
+        evaluated = [
+            item for item in evaluations if item["evaluation_status"] != "excluded"
+        ]
+        mergeable = [item for item in evaluated if item["verdict"] == "mergeable"]
+        human_review = [item for item in evaluated if item["verdict"] == "human-review"]
+
+        return {
+            "review_runs": len(evaluations),
+            "evaluated_runs": len(evaluated),
+            "excluded_runs": len(evaluations) - len(evaluated),
+            "mergeable": self.summarize_verdict(mergeable),
+            "human_review": self.summarize_verdict(human_review),
+            "missed_issue_count": sum(
+                1 for item in evaluations if item["missed_issue"]
+            ),
+            "false_positive_count": sum(
+                1 for item in evaluations if item["false_positive"]
+            ),
+        }
+
     def summarize_verdict(self, items: list[dict[str, Any]]) -> dict[str, Any]:
         """Summarize precision metrics for a verdict bucket.
 
@@ -179,6 +266,22 @@ class ReviewEvaluationService:
         success = sum(1 for item in items if item["evaluation_status"] == "success")
         failure = sum(1 for item in items if item["evaluation_status"] == "failure")
         total = len(items)
+        precision = success / total if total else 0
+        return {
+            "total": total,
+            "success": success,
+            "failure": failure,
+            "precision": precision,
+        }
+
+    def summarize_summary_verdicts(
+        self, verdict_summaries: Iterable[dict[str, Any]]
+    ) -> dict[str, Any]:
+        """Summarize precision metrics from stored verdict summaries."""
+        summaries = list(verdict_summaries)
+        success = sum(summary["success"] for summary in summaries)
+        failure = sum(summary["failure"] for summary in summaries)
+        total = sum(summary["total"] for summary in summaries)
         precision = success / total if total else 0
         return {
             "total": total,
