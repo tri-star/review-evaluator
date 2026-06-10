@@ -130,15 +130,28 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         summary=daily_summary, period="daily", key_name=target_date
     )
 
-    weekly_summary = None
+    recent_end_date = now.date()
+    recent_start_date = recent_end_date - timedelta(days=6)
+    recent_evaluations = review_store.load_recent_evaluations(
+        repo=repo, end_date=recent_end_date, days=7
+    )
+    recent_summary = service.build_period_summary(
+        repo=repo,
+        label="Last 7 days",
+        start_date=recent_start_date.isoformat(),
+        end_date=recent_end_date.isoformat(),
+        evaluations=recent_evaluations,
+    )
+    all_time_summary = service.build_period_summary(
+        repo=repo,
+        label="All-time",
+        evaluations=review_store.load_all_evaluations(repo=repo),
+    )
     if now.weekday() == 0:
-        weekly_evaluations = review_store.load_weekly_evaluations(
-            repo=repo, end_date=now.date()
-        )
         weekly_summary = service.build_weekly_summary(
             repo=repo,
-            target_date=now.date().isoformat(),
-            evaluations=weekly_evaluations,
+            target_date=recent_end_date.isoformat(),
+            evaluations=recent_evaluations,
         )
         review_store.write_summary(
             summary=weekly_summary, period="weekly", key_name=weekly_summary["week"]
@@ -147,7 +160,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     if github_summary_publisher and os.getenv("SUMMARY_ISSUE_NUMBER"):
         issue_body = summary_render_service.render_issue_body(
             daily_summary=daily_summary,
-            weekly_summary=weekly_summary,
+            recent_summary=recent_summary,
+            all_time_summary=all_time_summary,
         )
         github_summary_publisher.update_summary_issue(
             repo=repo,
@@ -158,7 +172,8 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     if slack_webhook:
         slack_text = summary_render_service.render_slack_text(
             daily_summary=daily_summary,
-            weekly_summary=weekly_summary,
+            recent_summary=recent_summary,
+            all_time_summary=all_time_summary,
         )
         slack_notifier.post_summary(
             webhook_url=slack_webhook,

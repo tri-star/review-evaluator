@@ -166,6 +166,44 @@ class ReviewEvaluationService:
             "false_positive_count": daily["false_positive_count"],
         }
 
+    def build_period_summary(
+        self,
+        repo: str,
+        label: str,
+        evaluations: list[dict[str, Any]],
+        start_date: str | None = None,
+        end_date: str | None = None,
+    ) -> dict[str, Any]:
+        """Build an aggregate summary for a named reporting period.
+
+        Args:
+            repo: Repository full name such as ``"owner/repo"``.
+            label: Human-readable period label such as ``"Last 7 days"``.
+            evaluations: Evaluation records gathered across the period.
+            start_date: Optional inclusive start date such as ``"2026-04-14"``.
+            end_date: Optional inclusive end date such as ``"2026-04-20"``.
+
+        Returns:
+            A period summary such as
+            ``{"label": "All-time", "mergeable": {"precision": 0.75}}``.
+        """
+        daily = self.build_daily_summary(
+            repo=repo, target_date=end_date or "", evaluations=evaluations
+        )
+        return {
+            "repo": repo,
+            "label": label,
+            "start_date": start_date,
+            "end_date": end_date,
+            "review_runs": daily["review_runs"],
+            "evaluated_runs": daily["evaluated_runs"],
+            "excluded_runs": daily["excluded_runs"],
+            "mergeable": daily["mergeable"],
+            "human_review": daily["human_review"],
+            "missed_issue_count": daily["missed_issue_count"],
+            "false_positive_count": daily["false_positive_count"],
+        }
+
     def summarize_verdict(self, items: list[dict[str, Any]]) -> dict[str, Any]:
         """Summarize precision metrics for a verdict bucket.
 

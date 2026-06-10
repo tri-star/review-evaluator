@@ -162,3 +162,45 @@ def test_週次サマリで_iso_week_を含む() -> None:
 
     assert summary["week"] == "2026-W17"
     assert summary["mergeable"]["precision"] == 1.0
+
+
+def test_期間サマリで_label_と期間を含めて集計できる() -> None:
+    service = ReviewEvaluationService(github_api_client=None)
+
+    summary = service.build_period_summary(
+        repo="owner/repo",
+        label="Last 7 days",
+        start_date="2026-04-14",
+        end_date="2026-04-20",
+        evaluations=[
+            {
+                "verdict": "mergeable",
+                "evaluation_status": "success",
+                "missed_issue": False,
+                "false_positive": False,
+            },
+            {
+                "verdict": "human-review",
+                "evaluation_status": "failure",
+                "missed_issue": True,
+                "false_positive": False,
+            },
+            {
+                "verdict": "mergeable",
+                "evaluation_status": "excluded",
+                "missed_issue": False,
+                "false_positive": True,
+            },
+        ],
+    )
+
+    assert summary["label"] == "Last 7 days"
+    assert summary["start_date"] == "2026-04-14"
+    assert summary["end_date"] == "2026-04-20"
+    assert summary["review_runs"] == 3
+    assert summary["evaluated_runs"] == 2
+    assert summary["excluded_runs"] == 1
+    assert summary["mergeable"]["precision"] == 1.0
+    assert summary["human_review"]["precision"] == 0.0
+    assert summary["missed_issue_count"] == 1
+    assert summary["false_positive_count"] == 1

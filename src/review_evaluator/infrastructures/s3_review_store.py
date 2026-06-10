@@ -57,9 +57,24 @@ class S3ReviewStore:
         Returns:
             A list of evaluation dicts across one week.
         """
+        return self.load_recent_evaluations(repo=repo, end_date=end_date, days=7)
+
+    def load_recent_evaluations(
+        self, repo: str, end_date: date, days: int
+    ) -> list[dict[str, Any]]:
+        """Load evaluation JSON files for a rolling date window from S3.
+
+        Args:
+            repo: Repository full name such as ``"owner/repo"``.
+            end_date: Inclusive end date such as ``date(2026, 4, 20)``.
+            days: Number of days to load, including the end date.
+
+        Returns:
+            A list of evaluation dicts across the requested date window.
+        """
         repo_key = repo.replace("/", "_")
         evaluations: list[dict[str, Any]] = []
-        for offset in range(7):
+        for offset in range(days):
             target = end_date - timedelta(days=offset)
             year = target.strftime("%Y")
             month = target.strftime("%m")
@@ -67,6 +82,19 @@ class S3ReviewStore:
             prefix = f"evaluations/repo_partition={repo_key}/year={year}/month={month}/day={day}/"
             evaluations.extend(self._load_json_objects(prefix=prefix))
         return evaluations
+
+    def load_all_evaluations(self, repo: str) -> list[dict[str, Any]]:
+        """Load all evaluation JSON files for a repository from S3.
+
+        Args:
+            repo: Repository full name such as ``"owner/repo"``.
+
+        Returns:
+            A list of all evaluation dicts under the repository partition.
+        """
+        repo_key = repo.replace("/", "_")
+        prefix = f"evaluations/repo_partition={repo_key}/"
+        return self._load_json_objects(prefix=prefix)
 
     def write_evaluation(self, item: dict[str, Any]) -> None:
         """Write a single evaluation result to S3.

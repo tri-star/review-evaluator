@@ -11,9 +11,11 @@ class FakePaginator:
     def __init__(self, pages: list[dict[str, Any]]) -> None:
         self.pages = pages
         self.last_prefix: str | None = None
+        self.prefixes: list[str] = []
 
     def paginate(self, Bucket: str, Prefix: str) -> list[dict[str, Any]]:
         self.last_prefix = Prefix
+        self.prefixes.append(Prefix)
         return self.pages
 
 
@@ -171,6 +173,43 @@ def test_週次evaluation読込時に_repo_partition_配下を辿る() -> None:
     assert s3_client.paginator.last_prefix == (
         "evaluations/repo_partition=tri-star_tasche/year=2026/month=04/day=15/"
     )
+
+
+def test_直近evaluation読込時に指定日数分の_prefix_を辿る() -> None:
+    s3_client = FakeS3Client(objects={}, pages=[])
+    store = S3ReviewStore(s3_client=s3_client, bucket="bucket")
+
+    store.load_recent_evaluations(
+        repo="tri-star/tasche", end_date=date(2026, 4, 21), days=3
+    )
+
+    assert s3_client.paginator.prefixes == [
+        "evaluations/repo_partition=tri-star_tasche/year=2026/month=04/day=21/",
+        "evaluations/repo_partition=tri-star_tasche/year=2026/month=04/day=20/",
+        "evaluations/repo_partition=tri-star_tasche/year=2026/month=04/day=19/",
+    ]
+
+
+def test_通算evaluation読込時に_repo_partition_全体を辿る() -> None:
+    key = "evaluations/repo_partition=tri-star_tasche/year=2026/month=04/day=21/pr=13.json"
+    s3_client = FakeS3Client(
+        objects={key: '{"repo": "tri-star/tasche", "pr_number": 13}'},
+        pages=[{"Contents": [{"Key": key}]}],
+    )
+    store = S3ReviewStore(s3_client=s3_client, bucket="bucket")
+
+    result = store.load_all_evaluations(repo="tri-star/tasche")
+
+    assert (
+        s3_client.paginator.last_prefix == "evaluations/repo_partition=tri-star_tasche/"
+    )
+    assert result == [
+        {
+            "repo": "tri-star/tasche",
+            "pr_number": 13,
+            "s3_key": key,
+        }
+    ]
 
 
 def test_summary書込時に_repo_partition_配下へ保存する() -> None:
