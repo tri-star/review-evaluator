@@ -72,6 +72,9 @@ class S3ReviewStore:
         Returns:
             A list of evaluation dicts across the requested date window.
         """
+        if days < 1:
+            raise ValueError("days must be greater than or equal to 1")
+
         repo_key = repo.replace("/", "_")
         evaluations: list[dict[str, Any]] = []
         for offset in range(days):
@@ -83,17 +86,17 @@ class S3ReviewStore:
             evaluations.extend(self._load_json_objects(prefix=prefix))
         return evaluations
 
-    def load_all_evaluations(self, repo: str) -> list[dict[str, Any]]:
-        """Load all evaluation JSON files for a repository from S3.
+    def load_all_daily_summaries(self, repo: str) -> list[dict[str, Any]]:
+        """Load all daily summary JSON files for a repository from S3.
 
         Args:
             repo: Repository full name such as ``"owner/repo"``.
 
         Returns:
-            A list of all evaluation dicts under the repository partition.
+            A list of all daily summary dicts under the repository partition.
         """
         repo_key = repo.replace("/", "_")
-        prefix = f"evaluations/repo_partition={repo_key}/"
+        prefix = f"aggregates/daily/repo_partition={repo_key}/"
         return self._load_json_objects(prefix=prefix)
 
     def write_evaluation(self, item: dict[str, Any]) -> None:

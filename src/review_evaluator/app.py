@@ -142,10 +142,10 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         end_date=recent_end_date.isoformat(),
         evaluations=recent_evaluations,
     )
-    all_time_summary = service.build_period_summary(
+    all_time_summary = service.build_period_summary_from_daily_summaries(
         repo=repo,
         label="All-time",
-        evaluations=review_store.load_all_evaluations(repo=repo),
+        daily_summaries=review_store.load_all_daily_summaries(repo=repo),
     )
     if now.weekday() == 0:
         weekly_summary = service.build_weekly_summary(

@@ -4,6 +4,8 @@ import io
 from datetime import date
 from typing import Any
 
+import pytest
+
 from infrastructures.s3_review_store import S3ReviewStore
 
 
@@ -190,23 +192,34 @@ def test_直近evaluation読込時に指定日数分の_prefix_を辿る() -> No
     ]
 
 
-def test_通算evaluation読込時に_repo_partition_全体を辿る() -> None:
-    key = "evaluations/repo_partition=tri-star_tasche/year=2026/month=04/day=21/pr=13.json"
+def test_直近evaluation読込時に_days_が1未満なら失敗する() -> None:
+    s3_client = FakeS3Client(objects={}, pages=[])
+    store = S3ReviewStore(s3_client=s3_client, bucket="bucket")
+
+    with pytest.raises(ValueError, match="days"):
+        store.load_recent_evaluations(
+            repo="tri-star/tasche", end_date=date(2026, 4, 21), days=0
+        )
+
+
+def test_通算daily_summary読込時に_repo_partition_全体を辿る() -> None:
+    key = "aggregates/daily/repo_partition=tri-star_tasche/date=2026-04-21/summary.json"
     s3_client = FakeS3Client(
-        objects={key: '{"repo": "tri-star/tasche", "pr_number": 13}'},
+        objects={key: '{"repo": "tri-star/tasche", "date": "2026-04-21"}'},
         pages=[{"Contents": [{"Key": key}]}],
     )
     store = S3ReviewStore(s3_client=s3_client, bucket="bucket")
 
-    result = store.load_all_evaluations(repo="tri-star/tasche")
+    result = store.load_all_daily_summaries(repo="tri-star/tasche")
 
     assert (
-        s3_client.paginator.last_prefix == "evaluations/repo_partition=tri-star_tasche/"
+        s3_client.paginator.last_prefix
+        == "aggregates/daily/repo_partition=tri-star_tasche/"
     )
     assert result == [
         {
             "repo": "tri-star/tasche",
-            "pr_number": 13,
+            "date": "2026-04-21",
             "s3_key": key,
         }
     ]
