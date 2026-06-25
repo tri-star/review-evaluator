@@ -20,6 +20,11 @@ from observability import logger
 from services.review_command_service import ReviewCommandService
 from services.review_evaluation_service import ReviewEvaluationService
 from services.rule_extraction_service import RuleExtractionService
+from services.rule_retention import (
+    DEFAULT_MAX_RULE_COUNT,
+    DEFAULT_RETENTION_DAYS,
+    select_prunable_rules,
+)
 from services.summary_render_service import SummaryRenderService
 
 
@@ -381,17 +386,48 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 "Slack notification skipped", extra={"reason": "no_webhook_url"}
             )
 
+        pruned_rules = _prune_low_usage_rules(
+            rule_store=S3RuleStore(s3_client=boto3.client("s3"), bucket=bucket),
+            now=datetime.now(timezone.utc),
+        )
+
         result = {
             "date": target_date,
             "review_runs": len(reviews),
             "evaluated_runs": daily_summary["evaluated_runs"],
             "excluded_runs": daily_summary["excluded_runs"],
+            "pruned_rules": pruned_rules,
         }
         logger.info("daily evaluation completed", extra=result)
         return result
     except Exception:
         logger.exception("daily evaluation failed")
         raise
+
+
+def _prune_low_usage_rules(*, rule_store: S3RuleStore, now: datetime) -> int:
+    """Delete low-usage rules when the rule set has grown too large.
+
+    Args:
+        rule_store: Rule store to read from and delete within.
+        now: Current time as an aware datetime.
+
+    Returns:
+        The number of rules deleted.
+    """
+    retention_days = int(os.getenv("RULE_RETENTION_DAYS", str(DEFAULT_RETENTION_DAYS)))
+    max_count = int(os.getenv("RULE_MAX_COUNT", str(DEFAULT_MAX_RULE_COUNT)))
+    rule_ids = select_prunable_rules(
+        rule_store.list_rules(),
+        now=now,
+        retention_days=retention_days,
+        max_count=max_count,
+    )
+    for rule_id in rule_ids:
+        rule_store.delete_rule(rule_id)
+    if rule_ids:
+        logger.info("low-usage rules pruned", extra={"count": len(rule_ids)})
+    return len(rule_ids)
 
 
 def required_env(name: str) -> str:

@@ -120,13 +120,28 @@ Resources:
             ScheduleExpression: cron(0 21 * * ? *)
             ScheduleExpressionTimezone: Asia/Tokyo
 
+  RuleExtractionDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      MessageRetentionPeriod: 1209600
+
+  RuleExtractionQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      VisibilityTimeout: 180
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt RuleExtractionDLQ.Arn
+        maxReceiveCount: 3
+
   ReviewCommandFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: src/review_evaluator/
       Handler: app.handle_review_command
-      Description: Handle GitHub App issue comment review commands.
+      Description: Handle GitHub App webhooks (review commands and pull_request events).
       Policies:
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt RuleExtractionQueue.QueueName
         - Statement:
             - !If
               - HasIntegrationsSecret
@@ -139,12 +154,44 @@ Resources:
         Variables:
           INTEGRATIONS_SECRET_ARN: !Ref IntegrationsSecretArn
           BOT_NAME: !Ref BotName
+          RULE_EXTRACTION_QUEUE_URL: !Ref RuleExtractionQueue
       Events:
         ReviewCommandWebhook:
           Type: HttpApi
           Properties:
             Path: /github/review-command
             Method: POST
+
+  RuleExtractorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/review_evaluator/
+      Handler: app.process_rule_extraction
+      Description: Extract reusable review rules from closed pull requests.
+      Timeout: 180
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !If
+              - UseManagedBucket
+              - !Ref ReviewDataBucket
+              - !Ref ReviewDataBucketName
+        - Statement:
+            - !If
+              - HasIntegrationsSecret
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref IntegrationsSecretArn
+              - !Ref AWS::NoValue
+      Environment:
+        Variables:
+          INTEGRATIONS_SECRET_ARN: !Ref IntegrationsSecretArn
+      Events:
+        RuleExtractionJob:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt RuleExtractionQueue.Arn
+            BatchSize: 1
 
 Outputs:
   ReviewEvaluatorFunctionArn:
