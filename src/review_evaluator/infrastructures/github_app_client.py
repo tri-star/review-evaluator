@@ -8,6 +8,8 @@ from typing import Any
 
 import jwt
 
+from observability import logger
+
 
 GITHUB_API = "https://api.github.com"
 
@@ -155,6 +157,7 @@ class GitHubAppClient:
                 "X-GitHub-Api-Version": "2022-11-28",
             },
         )
+        logger.debug("GitHub App API request", extra={"method": method, "path": path})
         try:
             with urllib.request.urlopen(request, timeout=20) as response:
                 status = response.status
@@ -163,15 +166,27 @@ class GitHubAppClient:
             status = error.code
             body = error.read().decode("utf-8")
         except urllib.error.URLError as error:
+            logger.warning(
+                "GitHub App API network error",
+                extra={"method": method, "path": path, "reason": str(error.reason)},
+            )
             raise GitHubApiError(
                 status=502,
                 message=f"GitHub API network error: {error.reason}",
             ) from error
         if status not in expected_statuses:
+            logger.warning(
+                "GitHub App API unexpected status",
+                extra={"method": method, "path": path, "status": status},
+            )
             raise GitHubApiError(
                 status=status,
                 message=f"GitHub API failed: {status}. Response: {body}",
             )
+        logger.debug(
+            "GitHub App API response",
+            extra={"method": method, "path": path, "status": status},
+        )
         if not body:
             return {}
         return json.loads(body)

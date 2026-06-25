@@ -5,6 +5,7 @@ description = "Lambda package for AI review daily evaluation."
 requires-python = ">=3.12"
 dependencies = [
   "pyjwt[crypto]>=2.10.1",
+  "aws-lambda-powertools>=3.0.0",
 ]
 
 [dependency-groups]

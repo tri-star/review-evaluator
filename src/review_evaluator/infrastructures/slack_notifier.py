@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import urllib.request
 
+from observability import logger
+
 
 class SlackNotifier:
     """Send daily and weekly summaries to Slack."""
@@ -17,6 +19,7 @@ class SlackNotifier:
         Returns:
             None. A message is posted to Slack.
         """
+        logger.info("posting summary to Slack")
         request = urllib.request.Request(
             webhook_url,
             method="POST",
@@ -24,4 +27,5 @@ class SlackNotifier:
             data=json.dumps({"text": text}).encode("utf-8"),
         )
         with urllib.request.urlopen(request, timeout=20):
-            return
+            pass
+        logger.info("Slack summary posted")

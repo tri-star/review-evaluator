@@ -3,6 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any, Protocol
 
+from observability import logger
+
 
 ALLOWED_PERMISSIONS = {"write", "maintain", "admin"}
 WORKFLOW_FILE = "pr-ai-review.yml"
@@ -38,21 +40,31 @@ class ReviewCommandService:
         self.bot_name = bot_name.lstrip("@")
 
     def handle(self, payload: dict[str, Any]) -> dict[str, Any]:
-        if payload.get("action") != "created":
+        action = payload.get("action")
+        if action != "created":
+            logger.info(
+                "review command ignored",
+                extra={"reason": "unsupported_action", "action": action},
+            )
             return {"ignored": True, "reason": "unsupported_action"}
 
         issue = payload.get("issue") or {}
         if "pull_request" not in issue:
+            logger.info("review command ignored", extra={"reason": "not_pull_request"})
             return {"ignored": True, "reason": "not_pull_request"}
 
         comment = payload.get("comment") or {}
         body = str(comment.get("body") or "")
         if not self._matches_review_command(body):
+            logger.info("review command ignored", extra={"reason": "command_mismatch"})
             return {"ignored": True, "reason": "command_mismatch"}
 
         repo = payload["repository"]["full_name"]
         pr_number = int(issue["number"])
         username = str(comment.get("user", {}).get("login") or "")
+        logger.append_keys(repo=repo, pr_number=pr_number, username=username)
+        logger.info("review command received")
+
         installation = self.github_client.fetch_repository_installation(repo)
         installation_id = int(installation["id"])
 
@@ -62,6 +74,10 @@ class ReviewCommandService:
             installation_id=installation_id,
         )
         if permission not in ALLOWED_PERMISSIONS:
+            logger.warning(
+                "review command rejected: insufficient permission",
+                extra={"permission": permission},
+            )
             self.github_client.post_issue_comment(
                 repo=repo,
                 issue_number=pr_number,
@@ -99,6 +115,7 @@ class ReviewCommandService:
             body=f"@{username} AI review を開始しました。",
             installation_id=installation_id,
         )
+        logger.info("review workflow dispatched", extra={"ref": ref})
         return {"ignored": False, "dispatched": True}
 
     def _matches_review_command(self, body: str) -> bool:

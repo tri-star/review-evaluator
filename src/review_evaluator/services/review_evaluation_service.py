@@ -4,6 +4,8 @@ from datetime import datetime
 from collections.abc import Iterable
 from typing import Any, Protocol
 
+from observability import logger
+
 
 class GitHubApiClientProtocol(Protocol):
     """Protocol for GitHub API clients used by the review evaluation service."""
@@ -80,6 +82,16 @@ class ReviewEvaluationService:
             evaluation_status = "failure"
         else:
             evaluation_status = "excluded"
+
+        logger.debug(
+            "evaluated review",
+            extra={
+                "pr_number": review["pr_number"],
+                "labels": labels,
+                "evaluation_status": evaluation_status,
+                "verdict": review["verdict"],
+            },
+        )
 
         return {
             "repo": review["repo"],
@@ -301,6 +313,10 @@ class ReviewEvaluationService:
             A list of label names such as ``["ai-eval:success", "ai-review:missed-issue"]``.
         """
         if self.github_api_client is None:
+            logger.warning(
+                "label lookup disabled — all reviews treated as excluded",
+                extra={"repo": repo, "pr_number": pr_number},
+            )
             return []
         labels = self.github_api_client.fetch_pr_labels(repo=repo, pr_number=pr_number)
         return [label["name"] for label in labels]

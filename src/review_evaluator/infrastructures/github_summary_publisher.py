@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import urllib.request
 
+from observability import logger
+
 
 GITHUB_API = "https://api.github.com"
 
@@ -37,6 +39,10 @@ class GitHubSummaryPublisher:
         Returns:
             None. The issue body is replaced via GitHub REST API.
         """
+        logger.info(
+            "updating GitHub summary issue",
+            extra={"repo": repo, "issue_number": issue_number},
+        )
         request = urllib.request.Request(
             f"{GITHUB_API}/repos/{repo}/issues/{issue_number}",
             method="PATCH",
@@ -48,4 +54,5 @@ class GitHubSummaryPublisher:
             data=json.dumps({"body": body}).encode("utf-8"),
         )
         with urllib.request.urlopen(request, timeout=20):
-            return
+            pass
+        logger.info("GitHub summary issue updated")

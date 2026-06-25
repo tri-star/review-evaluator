@@ -1,1 +1,2 @@
 PyJWT[crypto]>=2.10.1
+aws-lambda-powertools>=3.0.0

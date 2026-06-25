@@ -5,6 +5,8 @@ import re
 from datetime import date, datetime, timedelta
 from typing import Any
 
+from observability import logger
+
 
 REVIEW_KEY_PATTERN = re.compile(
     r"^reviews/repo_partition=(?P<repo_partition>[^/]+)/year=(?P<year>\d{4})/"
@@ -120,6 +122,7 @@ class S3ReviewStore:
             f"evaluations/repo_partition={repo_key}/year={year}/month={month}/day={day}/"
             f"pr={item['pr_number']}.json"
         )
+        logger.debug("writing evaluation to S3", extra={"key": key})
         self.s3_client.put_object(
             Bucket=self.bucket,
             Key=key,
@@ -145,6 +148,7 @@ class S3ReviewStore:
             key = f"aggregates/daily/repo_partition={repo_key}/date={key_name}/summary.json"
         else:
             key = f"aggregates/weekly/repo_partition={repo_key}/week={key_name}/summary.json"
+        logger.debug("writing summary to S3", extra={"key": key, "period": period})
         self.s3_client.put_object(
             Bucket=self.bucket,
             Key=key,
@@ -161,6 +165,7 @@ class S3ReviewStore:
         Returns:
             A list of JSON objects loaded from all files under the prefix.
         """
+        logger.debug("loading S3 objects", extra={"prefix": prefix})
         paginator = self.s3_client.get_paginator("list_objects_v2")
         items: list[dict[str, Any]] = []
         for page in paginator.paginate(Bucket=self.bucket, Prefix=prefix):
@@ -177,6 +182,7 @@ class S3ReviewStore:
                     payload = json.loads(line)
                     payload["s3_key"] = key
                     items.append(payload)
+        logger.debug("S3 objects loaded", extra={"prefix": prefix, "count": len(items)})
         return items
 
     def _normalize_review_item(self, item: dict[str, Any]) -> dict[str, Any]:

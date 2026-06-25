@@ -43,6 +43,15 @@ Parameters:
     Type: String
     Default: ""
     Description: Optional external Athena results bucket ARN.
+  LogLevel:
+    Type: String
+    Default: INFO
+    AllowedValues:
+      - DEBUG
+      - INFO
+      - WARNING
+      - ERROR
+    Description: Lambda log level. Use DEBUG to trace per-PR evaluation details.
 
 Conditions:
   UseManagedBucket: !Equals [!Ref CreateReviewDataBucket, "true"]
@@ -69,6 +78,8 @@ Globals:
         ATHENA_WORKGROUP_NAME: !Ref AthenaWorkGroupName
         ATHENA_DATABASE_NAME: !Ref AthenaDatabaseName
         ATHENA_RESULTS_BUCKET_ARN: !Ref AthenaResultsBucketArn
+        POWERTOOLS_SERVICE_NAME: review-evaluator
+        POWERTOOLS_LOG_LEVEL: !Ref LogLevel
 
 Resources:
   ReviewDataBucket:

@@ -14,6 +14,7 @@ from infrastructures.github_summary_publisher import GitHubSummaryPublisher
 from infrastructures.s3_review_store import S3ReviewStore
 from infrastructures.secrets_manager import SecretsManagerStore
 from infrastructures.slack_notifier import SlackNotifier
+from observability import logger
 from services.review_command_service import ReviewCommandService
 from services.review_evaluation_service import ReviewEvaluationService
 from services.summary_render_service import SummaryRenderService
@@ -22,6 +23,7 @@ from services.summary_render_service import SummaryRenderService
 JST = timezone(timedelta(hours=9))
 
 
+@logger.inject_lambda_context(clear_state=True)
 def handle_review_command(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """Handle GitHub App issue_comment webhooks for manual review commands."""
     import boto3
@@ -53,9 +55,17 @@ def _handle_review_command(
         signature=_header_value(event, "X-Hub-Signature-256"),
         secret=webhook_secret,
     ):
+        logger.warning("review command webhook: invalid signature")
         return _http_response(401, {"message": "invalid signature"})
 
     payload = json.loads(body.decode("utf-8"))
+    logger.info(
+        "review command webhook received",
+        extra={
+            "action": payload.get("action"),
+            "repo": (payload.get("repository") or {}).get("full_name"),
+        },
+    )
     app_id = secret_store.read_secret_value(
         arn=integrations_secret_arn, key="github/app-id"
     )
@@ -77,6 +87,7 @@ def _handle_review_command(
     return _http_response(200, result)
 
 
+@logger.inject_lambda_context(clear_state=True)
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """Run the daily review evaluation Lambda flow.
 
@@ -96,96 +107,173 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     now = datetime.now(JST)
     target_date = (now - timedelta(days=1)).date().isoformat()
 
-    review_store = S3ReviewStore(s3_client=boto3.client("s3"), bucket=bucket)
-    secret_store = SecretsManagerStore(client=boto3.client("secretsmanager"))
-
-    integrations_secret_arn = os.getenv("INTEGRATIONS_SECRET_ARN")
-    github_token = secret_store.read_secret_value(
-        arn=integrations_secret_arn, key="github/pat"
-    )
-    slack_webhook = secret_store.read_secret_value(
-        arn=integrations_secret_arn, key="slack/webhook-url"
-    )
-    github_api_client = GitHubApiClient(token=github_token) if github_token else None
-    github_summary_publisher = (
-        GitHubSummaryPublisher(token=github_token) if github_token else None
-    )
-    slack_notifier = SlackNotifier()
-    service = ReviewEvaluationService(github_api_client=github_api_client)
-    summary_render_service = SummaryRenderService()
-
-    reviews = review_store.load_review_results(repo=repo, target_date=target_date)
-    evaluations = service.evaluate_reviews(
-        reviews=reviews,
-        evaluated_at=datetime.now(timezone.utc).isoformat(),
+    logger.append_keys(repo=repo, target_date=target_date)
+    logger.info(
+        "daily evaluation started", extra={"bucket": bucket, "weekday": now.weekday()}
     )
 
-    for item in evaluations:
-        review_store.write_evaluation(item=item)
+    try:
+        review_store = S3ReviewStore(s3_client=boto3.client("s3"), bucket=bucket)
+        secret_store = SecretsManagerStore(client=boto3.client("secretsmanager"))
 
-    daily_summary = service.build_daily_summary(
-        repo=repo, target_date=target_date, evaluations=evaluations
-    )
-    review_store.write_summary(
-        summary=daily_summary, period="daily", key_name=target_date
-    )
+        integrations_secret_arn = os.getenv("INTEGRATIONS_SECRET_ARN")
+        github_token = secret_store.read_secret_value(
+            arn=integrations_secret_arn, key="github/pat"
+        )
+        slack_webhook = secret_store.read_secret_value(
+            arn=integrations_secret_arn, key="slack/webhook-url"
+        )
+        summary_issue_number = os.getenv("SUMMARY_ISSUE_NUMBER")
+        logger.info(
+            "configuration resolved",
+            extra={
+                "github_token_present": bool(github_token),
+                "slack_webhook_present": bool(slack_webhook),
+                "summary_issue_configured": bool(summary_issue_number),
+                "integrations_secret_configured": bool(integrations_secret_arn),
+            },
+        )
 
-    recent_end_date = now.date()
-    recent_start_date = recent_end_date - timedelta(days=6)
-    recent_evaluations = review_store.load_recent_evaluations(
-        repo=repo, end_date=recent_end_date, days=7
-    )
-    recent_summary = service.build_period_summary(
-        repo=repo,
-        label="Last 7 days",
-        start_date=recent_start_date.isoformat(),
-        end_date=recent_end_date.isoformat(),
-        evaluations=recent_evaluations,
-    )
-    all_time_summary = service.build_period_summary_from_daily_summaries(
-        repo=repo,
-        label="All-time",
-        daily_summaries=review_store.load_all_daily_summaries(repo=repo),
-    )
-    if now.weekday() == 0:
-        weekly_summary = service.build_weekly_summary(
-            repo=repo,
-            target_date=recent_end_date.isoformat(),
-            evaluations=recent_evaluations,
+        github_api_client = (
+            GitHubApiClient(token=github_token) if github_token else None
+        )
+        github_summary_publisher = (
+            GitHubSummaryPublisher(token=github_token) if github_token else None
+        )
+        slack_notifier = SlackNotifier()
+        service = ReviewEvaluationService(github_api_client=github_api_client)
+        summary_render_service = SummaryRenderService()
+
+        reviews = review_store.load_review_results(repo=repo, target_date=target_date)
+        logger.info("reviews loaded", extra={"count": len(reviews)})
+
+        evaluations = service.evaluate_reviews(
+            reviews=reviews,
+            evaluated_at=datetime.now(timezone.utc).isoformat(),
+        )
+        status_counts = {
+            "success": sum(
+                1 for e in evaluations if e["evaluation_status"] == "success"
+            ),
+            "failure": sum(
+                1 for e in evaluations if e["evaluation_status"] == "failure"
+            ),
+            "excluded": sum(
+                1 for e in evaluations if e["evaluation_status"] == "excluded"
+            ),
+        }
+        logger.info(
+            "evaluations complete", extra={"count": len(evaluations), **status_counts}
+        )
+
+        for item in evaluations:
+            review_store.write_evaluation(item=item)
+        logger.info("evaluations written", extra={"count": len(evaluations)})
+
+        daily_summary = service.build_daily_summary(
+            repo=repo, target_date=target_date, evaluations=evaluations
         )
         review_store.write_summary(
-            summary=weekly_summary, period="weekly", key_name=weekly_summary["week"]
+            summary=daily_summary, period="daily", key_name=target_date
+        )
+        logger.info(
+            "daily summary written",
+            extra={
+                "review_runs": daily_summary["review_runs"],
+                "evaluated_runs": daily_summary["evaluated_runs"],
+                "excluded_runs": daily_summary["excluded_runs"],
+            },
         )
 
-    if github_summary_publisher and os.getenv("SUMMARY_ISSUE_NUMBER"):
-        issue_body = summary_render_service.render_issue_body(
-            daily_summary=daily_summary,
-            recent_summary=recent_summary,
-            all_time_summary=all_time_summary,
+        recent_end_date = now.date()
+        recent_start_date = recent_end_date - timedelta(days=6)
+        recent_evaluations = review_store.load_recent_evaluations(
+            repo=repo, end_date=recent_end_date, days=7
         )
-        github_summary_publisher.update_summary_issue(
+        logger.info(
+            "recent evaluations loaded", extra={"count": len(recent_evaluations)}
+        )
+
+        recent_summary = service.build_period_summary(
             repo=repo,
-            issue_number=os.environ["SUMMARY_ISSUE_NUMBER"],
-            body=issue_body,
+            label="Last 7 days",
+            start_date=recent_start_date.isoformat(),
+            end_date=recent_end_date.isoformat(),
+            evaluations=recent_evaluations,
+        )
+        all_daily_summaries = review_store.load_all_daily_summaries(repo=repo)
+        all_time_summary = service.build_period_summary_from_daily_summaries(
+            repo=repo,
+            label="All-time",
+            daily_summaries=all_daily_summaries,
+        )
+        logger.info(
+            "all-time summary built",
+            extra={"daily_summary_count": len(all_daily_summaries)},
         )
 
-    if slack_webhook:
-        slack_text = summary_render_service.render_slack_text(
-            daily_summary=daily_summary,
-            recent_summary=recent_summary,
-            all_time_summary=all_time_summary,
-        )
-        slack_notifier.post_summary(
-            webhook_url=slack_webhook,
-            text=slack_text,
-        )
+        if now.weekday() == 0:
+            weekly_summary = service.build_weekly_summary(
+                repo=repo,
+                target_date=recent_end_date.isoformat(),
+                evaluations=recent_evaluations,
+            )
+            review_store.write_summary(
+                summary=weekly_summary, period="weekly", key_name=weekly_summary["week"]
+            )
+            logger.info(
+                "weekly summary written", extra={"week": weekly_summary["week"]}
+            )
+        else:
+            logger.info("weekly summary skipped", extra={"weekday": now.weekday()})
 
-    return {
-        "date": target_date,
-        "review_runs": len(reviews),
-        "evaluated_runs": daily_summary["evaluated_runs"],
-        "excluded_runs": daily_summary["excluded_runs"],
-    }
+        if github_summary_publisher and summary_issue_number:
+            issue_body = summary_render_service.render_issue_body(
+                daily_summary=daily_summary,
+                recent_summary=recent_summary,
+                all_time_summary=all_time_summary,
+            )
+            github_summary_publisher.update_summary_issue(
+                repo=repo,
+                issue_number=summary_issue_number,
+                body=issue_body,
+            )
+        else:
+            logger.info(
+                "GitHub summary issue update skipped",
+                extra={
+                    "reason": "no_token"
+                    if not github_summary_publisher
+                    else "no_issue_number",
+                },
+            )
+
+        if slack_webhook:
+            slack_text = summary_render_service.render_slack_text(
+                daily_summary=daily_summary,
+                recent_summary=recent_summary,
+                all_time_summary=all_time_summary,
+            )
+            slack_notifier.post_summary(
+                webhook_url=slack_webhook,
+                text=slack_text,
+            )
+        else:
+            logger.info(
+                "Slack notification skipped", extra={"reason": "no_webhook_url"}
+            )
+
+        result = {
+            "date": target_date,
+            "review_runs": len(reviews),
+            "evaluated_runs": daily_summary["evaluated_runs"],
+            "excluded_runs": daily_summary["excluded_runs"],
+        }
+        logger.info("daily evaluation completed", extra=result)
+        return result
+    except Exception:
+        logger.exception("daily evaluation failed")
+        raise
 
 
 def required_env(name: str) -> str:
