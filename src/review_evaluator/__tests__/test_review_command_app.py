@@ -143,6 +143,65 @@ def test_github_api_failure_returns_sanitized_error(monkeypatch: Any) -> None:
     assert "webhook-secret" not in response["body"]
 
 
+def test_pull_request_closed_enqueues_rule_extraction(monkeypatch: Any) -> None:
+    monkeypatch.setenv("INTEGRATIONS_SECRET_ARN", "arn")
+    enqueued: list[dict[str, Any]] = []
+    payload = {
+        "action": "closed",
+        "repository": {"full_name": "owner/repo"},
+        "pull_request": {"number": 42},
+    }
+    event = _event(payload, github_event="pull_request")
+
+    response = app._handle_github_webhook(
+        event=event,
+        secret_store=FakeSecretStore(),
+        client_factory=FakeClient,
+        enqueue=enqueued.append,
+    )
+
+    assert response["statusCode"] == 202
+    assert enqueued == [{"repo": "owner/repo", "pr_number": 42}]
+
+
+def test_pull_request_non_closed_action_is_ignored(monkeypatch: Any) -> None:
+    monkeypatch.setenv("INTEGRATIONS_SECRET_ARN", "arn")
+    enqueued: list[dict[str, Any]] = []
+    payload = {
+        "action": "opened",
+        "repository": {"full_name": "owner/repo"},
+        "pull_request": {"number": 42},
+    }
+    event = _event(payload, github_event="pull_request")
+
+    response = app._handle_github_webhook(
+        event=event,
+        secret_store=FakeSecretStore(),
+        client_factory=FakeClient,
+        enqueue=enqueued.append,
+    )
+
+    assert response["statusCode"] == 200
+    assert enqueued == []
+
+
+def test_issue_comment_event_delegates_to_review_command(monkeypatch: Any) -> None:
+    FakeClient.instances = []
+    monkeypatch.setenv("INTEGRATIONS_SECRET_ARN", "arn")
+    monkeypatch.setenv("BOT_NAME", "review-bot")
+    event = _event(_payload("@review-bot /review"), github_event="issue_comment")
+
+    response = app._handle_github_webhook(
+        event=event,
+        secret_store=FakeSecretStore(),
+        client_factory=FakeClient,
+        enqueue=lambda message: None,
+    )
+
+    assert response["statusCode"] == 200
+    assert json.loads(response["body"]) == {"ignored": False, "dispatched": True}
+
+
 def _payload(body: str) -> dict[str, Any]:
     return {
         "action": "created",
@@ -152,7 +211,9 @@ def _payload(body: str) -> dict[str, Any]:
     }
 
 
-def _event(payload: dict[str, Any]) -> dict[str, Any]:
+def _event(
+    payload: dict[str, Any], github_event: str = "issue_comment"
+) -> dict[str, Any]:
     body = json.dumps(payload)
     digest = hmac.new(
         b"webhook-secret",
@@ -160,7 +221,10 @@ def _event(payload: dict[str, Any]) -> dict[str, Any]:
         hashlib.sha256,
     ).hexdigest()
     return {
-        "headers": {"X-Hub-Signature-256": f"sha256={digest}"},
+        "headers": {
+            "X-Hub-Signature-256": f"sha256={digest}",
+            "X-GitHub-Event": github_event,
+        },
         "body": body,
         "isBase64Encoded": False,
     }
