@@ -24,6 +24,21 @@ Parameters:
     Type: String
     Default: review-bot
     Description: GitHub bot login without @ used for review commands.
+  RuleGeneratorProvider:
+    Type: String
+    Default: openai
+    AllowedValues:
+      - openai
+      - anthropic
+    Description: LLM provider used to extract review rules.
+  AnthropicModel:
+    Type: String
+    Default: claude-haiku-4-5
+    Description: Anthropic model id used when RuleGeneratorProvider=anthropic.
+  OpenAiModel:
+    Type: String
+    Default: gpt-5.4-mini
+    Description: OpenAI model id used when RuleGeneratorProvider=openai.
   SummaryIssueNumber:
     Type: String
     Default: ""
@@ -186,6 +201,9 @@ Resources:
       Environment:
         Variables:
           INTEGRATIONS_SECRET_ARN: !Ref IntegrationsSecretArn
+          RULE_GENERATOR_PROVIDER: !Ref RuleGeneratorProvider
+          ANTHROPIC_MODEL: !Ref AnthropicModel
+          OPENAI_MODEL: !Ref OpenAiModel
       Events:
         RuleExtractionJob:
           Type: SQS

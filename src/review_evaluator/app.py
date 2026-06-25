@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from infrastructures.anthropic_rule_generator import AnthropicRuleGenerator
+from infrastructures.openai_rule_generator import OpenAIRuleGenerator
 from infrastructures.github_app_client import GitHubApiError, GitHubAppClient
 from infrastructures.github_api import GitHubApiClient
 from infrastructures.github_summary_publisher import GitHubSummaryPublisher
@@ -123,6 +124,32 @@ def _handle_pull_request_event(
     return _http_response(202, {"enqueued": True, "repo": repo, "pr_number": pr_number})
 
 
+def _build_rule_generator(
+    *, secret_store: SecretsManagerStore, arn: str | None
+) -> AnthropicRuleGenerator | OpenAIRuleGenerator:
+    """Build the rule generator selected by ``RULE_GENERATOR_PROVIDER``.
+
+    Args:
+        secret_store: Secrets Manager wrapper used to read the provider API key.
+        arn: Integrations secret ARN holding the provider API keys.
+
+    Returns:
+        An ``OpenAIRuleGenerator`` or ``AnthropicRuleGenerator``.
+    """
+    provider = (os.getenv("RULE_GENERATOR_PROVIDER") or "openai").lower()
+    if provider == "openai":
+        api_key = secret_store.read_secret_value(arn=arn, key="openai/api-key")
+        if not api_key:
+            raise RuntimeError("Missing openai/api-key in integrations secret")
+        return OpenAIRuleGenerator(api_key=api_key)
+    if provider == "anthropic":
+        api_key = secret_store.read_secret_value(arn=arn, key="anthropic/api-key")
+        if not api_key:
+            raise RuntimeError("Missing anthropic/api-key in integrations secret")
+        return AnthropicRuleGenerator(api_key=api_key)
+    raise RuntimeError(f"Unknown RULE_GENERATOR_PROVIDER: {provider}")
+
+
 @logger.inject_lambda_context(clear_state=True)
 def process_rule_extraction(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """Worker for SQS-delivered rule-extraction jobs from closed pull requests."""
@@ -137,18 +164,15 @@ def process_rule_extraction(event: dict[str, Any], context: Any) -> dict[str, An
     private_key = secret_store.read_secret_value(
         arn=integrations_secret_arn, key="github/app-private-key"
     )
-    api_key = secret_store.read_secret_value(
-        arn=integrations_secret_arn, key="anthropic/api-key"
-    )
     if not app_id or not private_key:
         raise RuntimeError("Missing GitHub App credentials in integrations secret")
-    if not api_key:
-        raise RuntimeError("Missing anthropic/api-key in integrations secret")
 
     service = RuleExtractionService(
         github_client=GitHubAppClient(app_id=app_id, private_key=private_key),
         rule_store=S3RuleStore(s3_client=boto3.client("s3"), bucket=bucket),
-        rule_generator=AnthropicRuleGenerator(api_key=api_key),
+        rule_generator=_build_rule_generator(
+            secret_store=secret_store, arn=integrations_secret_arn
+        ),
     )
 
     records = event.get("Records", [])

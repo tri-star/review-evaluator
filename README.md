@@ -112,6 +112,7 @@ secret 名の例は `review-evaluator/dev/integrations`。
   "github/app-private-key": "-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----",
   "github/webhook-secret": "github-app-webhook-secret",
   "slack/webhook-url": "https://hooks.slack.com/services/xxx/yyy/zzz",
+  "openai/api-key": "sk-xxx",
   "anthropic/api-key": "sk-ant-xxx"
 }
 ```
@@ -121,7 +122,7 @@ Lambda には secret の中身を直接渡さず、`IntegrationsSecretArn` だ�
 
 `github/pat` と `slack/webhook-url` は日次集計 Lambda が利用する。
 `github/app-id`、`github/app-private-key`、`github/webhook-secret` は GitHub App webhook Lambda が利用する。
-`anthropic/api-key` は PR クローズ時にレビュールールを抽出する `RuleExtractorFunction` が利用する。
+`RuleExtractorFunction` は `RuleGeneratorProvider` に応じて `openai/api-key`（既定）または `anthropic/api-key` を利用する。使用するプロバイダのキーだけ用意すればよい。
 
 ### GitHub App webhook
 
@@ -152,6 +153,14 @@ Pull request が `closed` になると、対象 PR のコメント・レビュ�
 - Bot のレビューコメントに含まれる `<!-- RuleId: {rule_id} -->` マーカーを検出し、対象ルールの `recent_usage` に利用日時を追記する
 
 利用頻度の低いルールの削除は日次集計 Lambda が担当し、`RULE_MAX_COUNT` を超えた場合に `RULE_RETENTION_DAYS` を超えて未使用のルールを削除する。
+
+ルール生成に使う LLM プロバイダは SAM パラメータ `RuleGeneratorProvider`（`openai` / `anthropic`、既定 `openai`）で切り替える。既定モデルは OpenAI が `gpt-5.4-mini`（`OpenAiModel` で上書き可）、Anthropic が `claude-haiku-4-5`（`AnthropicModel` で上書き可）。いずれも SDK は使わず urllib で各 API を呼ぶ。
+
+| パラメータ | 既定値 | 用途 |
+| --- | --- | --- |
+| `RuleGeneratorProvider` | `openai` | ルール生成に使う LLM プロバイダ |
+| `OpenAiModel` | `gpt-5.4-mini` | provider=openai のモデル |
+| `AnthropicModel` | `claude-haiku-4-5` | provider=anthropic のモデル |
 
 レビュールールの「消費」（S3 からルールを取得してレビュープロンプトへ注入し、適用したルールにマーカーを付与する処理）は対象リポジトリ側の `pr-ai-review.yml` で実装する。
 
