@@ -8,15 +8,24 @@ import os
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from infrastructures.anthropic_rule_generator import AnthropicRuleGenerator
+from infrastructures.openai_rule_generator import OpenAIRuleGenerator
 from infrastructures.github_app_client import GitHubApiError, GitHubAppClient
 from infrastructures.github_api import GitHubApiClient
 from infrastructures.github_summary_publisher import GitHubSummaryPublisher
 from infrastructures.s3_review_store import S3ReviewStore
+from infrastructures.s3_rule_store import S3RuleStore
 from infrastructures.secrets_manager import SecretsManagerStore
 from infrastructures.slack_notifier import SlackNotifier
 from observability import logger
 from services.review_command_service import ReviewCommandService
 from services.review_evaluation_service import ReviewEvaluationService
+from services.rule_extraction_service import RuleExtractionService
+from services.rule_retention import (
+    DEFAULT_MAX_RULE_COUNT,
+    DEFAULT_RETENTION_DAYS,
+    select_prunable_rules,
+)
 from services.summary_render_service import SummaryRenderService
 
 
@@ -25,15 +34,160 @@ JST = timezone(timedelta(hours=9))
 
 @logger.inject_lambda_context(clear_state=True)
 def handle_review_command(event: dict[str, Any], context: Any) -> dict[str, Any]:
-    """Handle GitHub App issue_comment webhooks for manual review commands."""
+    """Handle GitHub App webhooks (issue_comment commands and pull_request events).
+
+    A GitHub App has a single webhook URL, so issue_comment and pull_request
+    events both arrive here; routing is by the ``X-GitHub-Event`` header.
+    """
     import boto3
 
     secret_store = SecretsManagerStore(client=boto3.client("secretsmanager"))
-    return _handle_review_command(
+
+    def enqueue(message: dict[str, Any]) -> None:
+        sqs = boto3.client("sqs")
+        sqs.send_message(
+            QueueUrl=required_env("RULE_EXTRACTION_QUEUE_URL"),
+            MessageBody=json.dumps(message),
+        )
+
+    return _handle_github_webhook(
         event=event,
         secret_store=secret_store,
         client_factory=GitHubAppClient,
+        enqueue=enqueue,
     )
+
+
+def _handle_github_webhook(
+    *,
+    event: dict[str, Any],
+    secret_store: SecretsManagerStore,
+    client_factory: type[GitHubAppClient],
+    enqueue: Any,
+) -> dict[str, Any]:
+    """Route a GitHub webhook by ``X-GitHub-Event`` to the matching handler.
+
+    ``pull_request`` closed events enqueue an async rule-extraction job and
+    return immediately so the webhook does not time out on LLM work. Everything
+    else falls through to the synchronous review-command flow.
+    """
+    event_type = _header_value(event, "X-GitHub-Event")
+    if event_type == "pull_request":
+        return _handle_pull_request_event(
+            event=event, secret_store=secret_store, enqueue=enqueue
+        )
+    return _handle_review_command(
+        event=event,
+        secret_store=secret_store,
+        client_factory=client_factory,
+    )
+
+
+def _handle_pull_request_event(
+    *,
+    event: dict[str, Any],
+    secret_store: SecretsManagerStore,
+    enqueue: Any,
+) -> dict[str, Any]:
+    integrations_secret_arn = os.getenv("INTEGRATIONS_SECRET_ARN")
+    webhook_secret = secret_store.read_secret_value(
+        arn=integrations_secret_arn, key="github/webhook-secret"
+    )
+    if not webhook_secret:
+        raise RuntimeError("Missing github/webhook-secret in integrations secret")
+
+    body = _event_body_bytes(event)
+    if not _verify_github_signature(
+        body=body,
+        signature=_header_value(event, "X-Hub-Signature-256"),
+        secret=webhook_secret,
+    ):
+        logger.warning("pull_request webhook: invalid signature")
+        return _http_response(401, {"message": "invalid signature"})
+
+    payload = json.loads(body.decode("utf-8"))
+    action = payload.get("action")
+    if action != "closed":
+        logger.info("pull_request webhook ignored", extra={"action": action})
+        return _http_response(200, {"ignored": True, "reason": "unsupported_action"})
+
+    repo = (payload.get("repository") or {}).get("full_name")
+    pr_number = (payload.get("pull_request") or {}).get("number")
+    if not repo or pr_number is None:
+        logger.warning("pull_request webhook missing repo or pr_number")
+        return _http_response(200, {"ignored": True, "reason": "incomplete_payload"})
+
+    enqueue({"repo": repo, "pr_number": int(pr_number)})
+    logger.info(
+        "rule extraction enqueued", extra={"repo": repo, "pr_number": pr_number}
+    )
+    return _http_response(202, {"enqueued": True, "repo": repo, "pr_number": pr_number})
+
+
+def _build_rule_generator(
+    *, secret_store: SecretsManagerStore, arn: str | None
+) -> AnthropicRuleGenerator | OpenAIRuleGenerator:
+    """Build the rule generator selected by ``RULE_GENERATOR_PROVIDER``.
+
+    Args:
+        secret_store: Secrets Manager wrapper used to read the provider API key.
+        arn: Integrations secret ARN holding the provider API keys.
+
+    Returns:
+        An ``OpenAIRuleGenerator`` or ``AnthropicRuleGenerator``.
+    """
+    provider = (os.getenv("RULE_GENERATOR_PROVIDER") or "openai").lower()
+    if provider == "openai":
+        api_key = secret_store.read_secret_value(arn=arn, key="openai/api-key")
+        if not api_key:
+            raise RuntimeError("Missing openai/api-key in integrations secret")
+        return OpenAIRuleGenerator(api_key=api_key)
+    if provider == "anthropic":
+        api_key = secret_store.read_secret_value(arn=arn, key="anthropic/api-key")
+        if not api_key:
+            raise RuntimeError("Missing anthropic/api-key in integrations secret")
+        return AnthropicRuleGenerator(api_key=api_key)
+    raise RuntimeError(f"Unknown RULE_GENERATOR_PROVIDER: {provider}")
+
+
+@logger.inject_lambda_context(clear_state=True)
+def process_rule_extraction(event: dict[str, Any], context: Any) -> dict[str, Any]:
+    """Worker for SQS-delivered rule-extraction jobs from closed pull requests."""
+    import boto3
+
+    bucket = required_env("REVIEW_DATA_BUCKET")
+    secret_store = SecretsManagerStore(client=boto3.client("secretsmanager"))
+    integrations_secret_arn = os.getenv("INTEGRATIONS_SECRET_ARN")
+    app_id = secret_store.read_secret_value(
+        arn=integrations_secret_arn, key="github/app-id"
+    )
+    private_key = secret_store.read_secret_value(
+        arn=integrations_secret_arn, key="github/app-private-key"
+    )
+    if not app_id or not private_key:
+        raise RuntimeError("Missing GitHub App credentials in integrations secret")
+
+    service = RuleExtractionService(
+        github_client=GitHubAppClient(app_id=app_id, private_key=private_key),
+        rule_store=S3RuleStore(s3_client=boto3.client("s3"), bucket=bucket),
+        rule_generator=_build_rule_generator(
+            secret_store=secret_store, arn=integrations_secret_arn
+        ),
+    )
+
+    records = event.get("Records", [])
+    for record in records:
+        body = json.loads(record["body"])
+        repo = body.get("repo")
+        pr_number = body.get("pr_number")
+        if not repo or pr_number is None:
+            logger.warning(
+                "malformed SQS record skipped", extra={"body": str(body)[:200]}
+            )
+            continue
+        service.handle(repo=repo, pr_number=int(pr_number))
+    logger.info("rule extraction batch complete", extra={"records": len(records)})
+    return {"processed": len(records)}
 
 
 def _handle_review_command(
@@ -263,17 +417,54 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 "Slack notification skipped", extra={"reason": "no_webhook_url"}
             )
 
+        pruned_rules = 0
+        try:
+            pruned_rules = _prune_low_usage_rules(
+                rule_store=S3RuleStore(s3_client=boto3.client("s3"), bucket=bucket),
+                now=datetime.now(timezone.utc),
+            )
+        except Exception:
+            logger.exception("low-usage rule pruning failed; skipping")
+
         result = {
             "date": target_date,
             "review_runs": len(reviews),
             "evaluated_runs": daily_summary["evaluated_runs"],
             "excluded_runs": daily_summary["excluded_runs"],
+            "pruned_rules": pruned_rules,
         }
         logger.info("daily evaluation completed", extra=result)
         return result
     except Exception:
         logger.exception("daily evaluation failed")
         raise
+
+
+def _prune_low_usage_rules(*, rule_store: S3RuleStore, now: datetime) -> int:
+    """Delete low-usage rules when the rule set has grown too large.
+
+    Args:
+        rule_store: Rule store to read from and delete within.
+        now: Current time as an aware datetime.
+
+    Returns:
+        The number of rules deleted.
+    """
+    retention_days = int(os.getenv("RULE_RETENTION_DAYS", str(DEFAULT_RETENTION_DAYS)))
+    max_count = int(os.getenv("RULE_MAX_COUNT", str(DEFAULT_MAX_RULE_COUNT)))
+    rules = rule_store.list_rules()
+    rule_packages = {r["rule_id"]: r.get("package") for r in rules}
+    rule_ids = select_prunable_rules(
+        rules,
+        now=now,
+        retention_days=retention_days,
+        max_count=max_count,
+    )
+    for rule_id in rule_ids:
+        rule_store.delete_rule(rule_id, package=rule_packages.get(rule_id))
+    if rule_ids:
+        logger.info("low-usage rules pruned", extra={"count": len(rule_ids)})
+    return len(rule_ids)
 
 
 def required_env(name: str) -> str:

@@ -106,6 +106,53 @@ class GitHubAppClient:
             expected_statuses={201},
         )
 
+    def fetch_pr_issue_comments(
+        self, repo: str, pr_number: int, installation_id: int
+    ) -> list[dict[str, Any]]:
+        """Fetch issue-level (conversation) comments on a pull request."""
+        return self._request_paginated(
+            f"/repos/{repo}/issues/{pr_number}/comments",
+            token=self._installation_token(installation_id),
+        )
+
+    def fetch_pr_review_comments(
+        self, repo: str, pr_number: int, installation_id: int
+    ) -> list[dict[str, Any]]:
+        """Fetch inline review comments on a pull request."""
+        return self._request_paginated(
+            f"/repos/{repo}/pulls/{pr_number}/comments",
+            token=self._installation_token(installation_id),
+        )
+
+    def _request_paginated(
+        self, path: str, *, token: str, per_page: int = 100
+    ) -> list[dict[str, Any]]:
+        """Fetch all pages of a GitHub list endpoint.
+
+        Args:
+            path: API path such as ``"/repos/owner/repo/issues/1/comments"``.
+            token: Installation access token.
+            per_page: Page size such as ``100``.
+
+        Returns:
+            The concatenated list of items across all pages.
+        """
+        separator = "&" if "?" in path else "?"
+        items: list[dict[str, Any]] = []
+        page = 1
+        while True:
+            payload = self._request_json(
+                "GET",
+                f"{path}{separator}per_page={per_page}&page={page}",
+                token=token,
+                expected_statuses={200},
+            )
+            batch = payload if isinstance(payload, list) else []
+            items.extend(batch)
+            if len(batch) < per_page:
+                return items
+            page += 1
+
     def _installation_token(self, installation_id: int) -> str:
         token = self._installation_tokens.get(installation_id)
         if token:

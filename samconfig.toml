@@ -18,6 +18,7 @@ parameter_overrides = [
   "ReviewDataBucketName=dev-review-evaluator-data-955192521523-ap-southeast-1",
   "RepoFullName=tri-star/tasche",
   "BotName=review-bot",
+  "RuleGeneratorProvider=openai",
   "SummaryIssueNumber=12",
   "AthenaWorkGroupName=dev-review-evaluator",
   "AthenaDatabaseName=dev_review_evaluator",

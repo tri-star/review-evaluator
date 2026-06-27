@@ -89,6 +89,7 @@ AI Review Daily Summary は、前日分のレビュー評価を日次集計と�
 - review result は `reviews/repo_partition={owner_repo}/year={YYYY}/month={MM}/day={DD}/pr={PR_NUMBER}/run={RUN_AT}.json` に保存される
 - evaluation result は `evaluations/repo_partition={owner_repo}/year={YYYY}/month={MM}/day={DD}/pr={PR_NUMBER}.json` に保存される
 - daily / weekly summary は `aggregates/daily/repo_partition={owner_repo}/...` と `aggregates/weekly/repo_partition={owner_repo}/...` に保存される
+- review rule は `rules/package={frontend|backend}/{rule_id}.json` に 1 ルール 1 ファイルで保存される。`rule_id` は uuid で、レビューエージェントがルールを使った際にコメントへ埋め込む `<!-- RuleId: {rule_id} -->` マーカーの安定キーとなる。`category` はファイル内属性として持ち、再分類時にオブジェクト移動を不要にする
 - Lambda は review JSON 本文に `repo`, `pr_number`, `run_at` が無い場合、S3 キーから補完して評価処理へ渡す
 - `head_sha` は任意項目として扱う。将来的に厳密な照合が必要なら upstream 側で本文へ含める
 
@@ -110,7 +111,9 @@ secret 名の例は `review-evaluator/dev/integrations`。
   "github/app-id": "123456",
   "github/app-private-key": "-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----",
   "github/webhook-secret": "github-app-webhook-secret",
-  "slack/webhook-url": "https://hooks.slack.com/services/xxx/yyy/zzz"
+  "slack/webhook-url": "https://hooks.slack.com/services/xxx/yyy/zzz",
+  "openai/api-key": "sk-xxx",
+  "anthropic/api-key": "sk-ant-xxx"
 }
 ```
 
@@ -118,12 +121,17 @@ Lambda には secret の中身を直接渡さず、`IntegrationsSecretArn` だ�
 実行時に Lambda が Secrets Manager から値を取得する。
 
 `github/pat` と `slack/webhook-url` は日次集計 Lambda が利用する。
-`github/app-id`、`github/app-private-key`、`github/webhook-secret` は GitHub App webhook の `/review` コマンド用 Lambda が利用する。
+`github/app-id`、`github/app-private-key`、`github/webhook-secret` は GitHub App webhook Lambda が利用する。
+`RuleExtractorFunction` は `RuleGeneratorProvider` に応じて `openai/api-key`（既定）または `anthropic/api-key` を利用する。使用するプロバイダのキーだけ用意すればよい。
 
 ### GitHub App webhook
 
 SAM の `ReviewCommandWebhookUrl` output を GitHub App の Webhook URL に設定する。
-GitHub App は Issue comment event を subscribe し、次の repository permissions を付与する。
+GitHub App の Webhook URL はアプリにつき 1 つのため、Issue comment event と Pull request event を同じエンドポイントで受け、Lambda 側が `X-GitHub-Event` ヘッダで処理を振り分ける。
+次の event を subscribe し、repository permissions を付与する。
+
+- Issue comment
+- Pull request
 
 - Issues: Read & Write
 - Pull requests: Read
@@ -132,6 +140,29 @@ GitHub App は Issue comment event を subscribe し、次の repository permiss
 
 Issue comment に `@review-bot /review` または `@review-bot review` が投稿されると、対象 PR の情報を inputs として `.github/workflows/pr-ai-review.yml` の `workflow_dispatch` を実行する。
 `BotName` パラメータを上書きすると、別の mention 名でも運用できる。
+
+Pull request が `closed` になると、対象 PR のコメント・レビューコメントを SQS 経由で `RuleExtractorFunction` に渡し、再利用可能なレビュールールを抽出して S3 に蓄積する。Webhook のタイムアウトを避けるため、抽出本体は SQS ワーカーに分離している。
+
+### レビュールールの抽出
+
+`RuleExtractorFunction` は PR クローズ時に次を行う。
+
+- PR の会話コメントとインラインレビューコメントを取得し、Bot 自身のコメントやマーカー付きコメントを学習対象から除外する
+- 「ありがとうございます」等のレビューと無関係なコメントは Claude による判定で除外する
+- 既存ルールで表現済みの指摘は再利用、新規観点のみ `name` / `package` / `category` / `body` を生成して S3 に保存する（命名は AI モデルが自動生成）
+- Bot のレビューコメントに含まれる `<!-- RuleId: {rule_id} -->` マーカーを検出し、対象ルールの `recent_usage` に利用日時を追記する
+
+利用頻度の低いルールの削除は日次集計 Lambda が担当し、`RULE_MAX_COUNT` を超えた場合に `RULE_RETENTION_DAYS` を超えて未使用のルールを削除する。
+
+ルール生成に使う LLM プロバイダは SAM パラメータ `RuleGeneratorProvider`（`openai` / `anthropic`、既定 `openai`）で切り替える。既定モデルは OpenAI が `gpt-5.4-mini`（`OpenAiModel` で上書き可）、Anthropic が `claude-haiku-4-5`（`AnthropicModel` で上書き可）。いずれも SDK は使わず urllib で各 API を呼ぶ。
+
+| パラメータ | 既定値 | 用途 |
+| --- | --- | --- |
+| `RuleGeneratorProvider` | `openai` | ルール生成に使う LLM プロバイダ |
+| `OpenAiModel` | `gpt-5.4-mini` | provider=openai のモデル |
+| `AnthropicModel` | `claude-haiku-4-5` | provider=anthropic のモデル |
+
+レビュールールの「消費」（S3 からルールを取得してレビュープロンプトへ注入し、適用したルールにマーカーを付与する処理）は対象リポジトリ側の `pr-ai-review.yml` で実装する。
 
 ### デプロイ手順
 
