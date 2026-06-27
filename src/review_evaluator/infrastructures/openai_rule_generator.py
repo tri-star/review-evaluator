@@ -126,6 +126,10 @@ class OpenAIRuleGenerator:
         content = message.get("content") or ""
         if not content:
             return []
-        parsed = json.loads(content)
+        try:
+            parsed = json.loads(content)
+        except json.JSONDecodeError:
+            logger.warning("OpenAI API returned invalid JSON; skipping")
+            return []
         decisions = parsed.get("decisions")
         return decisions if isinstance(decisions, list) else []

@@ -107,3 +107,23 @@ def test_delete_rule_は対象キーを削除する() -> None:
 
     assert s3_client.deleted == ["rules/package=frontend/r9.json"]
     assert s3_client.objects == {}
+
+
+def test_delete_rule_with_package_skips_prefix_scan() -> None:
+    """package 指定時は list_objects_v2 を呼ばずに直接 delete_object する。"""
+    scan_calls: list[str] = []
+
+    class TrackingScanClient(FakeS3Client):
+        def get_paginator(self, name: str) -> FakePaginator:
+            scan_calls.append(name)
+            return super().get_paginator(name)
+
+    s3_client = TrackingScanClient(
+        objects={"rules/package=backend/r10.json": json.dumps({"rule_id": "r10"})}
+    )
+    store = S3RuleStore(s3_client=s3_client, bucket="bucket")
+
+    store.delete_rule(rule_id="r10", package="backend")
+
+    assert scan_calls == []
+    assert s3_client.deleted == ["rules/package=backend/r10.json"]

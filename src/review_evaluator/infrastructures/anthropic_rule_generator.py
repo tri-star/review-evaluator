@@ -127,6 +127,10 @@ class AnthropicRuleGenerator:
         )
         if not text:
             return []
-        parsed = json.loads(text)
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            logger.warning("Anthropic API returned invalid JSON; skipping")
+            return []
         decisions = parsed.get("decisions")
         return decisions if isinstance(decisions, list) else []

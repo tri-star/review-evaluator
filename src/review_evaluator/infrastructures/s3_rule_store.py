@@ -104,21 +104,26 @@ class S3RuleStore:
         )
         logger.debug("rule usage appended", extra={"rule_id": rule_id, "key": key})
 
-    def delete_rule(self, rule_id: str) -> None:
+    def delete_rule(self, rule_id: str, package: str | None = None) -> None:
         """Delete a rule from S3, ignoring unknown ids.
 
         Args:
             rule_id: Rule identifier such as ``"abc-123"``.
+            package: When provided, constructs the S3 key directly without
+                scanning. When omitted, falls back to a prefix scan.
 
         Returns:
             None.
         """
-        key = self._find_rule_key(rule_id)
-        if key is None:
-            logger.warning(
-                "delete for unknown rule ignored", extra={"rule_id": rule_id}
-            )
-            return
+        if package is not None:
+            key = self._rule_key(package, rule_id)
+        else:
+            key = self._find_rule_key(rule_id)
+            if key is None:
+                logger.warning(
+                    "delete for unknown rule ignored", extra={"rule_id": rule_id}
+                )
+                return
         self.s3_client.delete_object(Bucket=self.bucket, Key=key)
         logger.info("rule deleted", extra={"rule_id": rule_id, "key": key})
 

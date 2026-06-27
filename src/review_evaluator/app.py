@@ -410,10 +410,14 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 "Slack notification skipped", extra={"reason": "no_webhook_url"}
             )
 
-        pruned_rules = _prune_low_usage_rules(
-            rule_store=S3RuleStore(s3_client=boto3.client("s3"), bucket=bucket),
-            now=datetime.now(timezone.utc),
-        )
+        pruned_rules = 0
+        try:
+            pruned_rules = _prune_low_usage_rules(
+                rule_store=S3RuleStore(s3_client=boto3.client("s3"), bucket=bucket),
+                now=datetime.now(timezone.utc),
+            )
+        except Exception:
+            logger.exception("low-usage rule pruning failed; skipping")
 
         result = {
             "date": target_date,
@@ -441,14 +445,16 @@ def _prune_low_usage_rules(*, rule_store: S3RuleStore, now: datetime) -> int:
     """
     retention_days = int(os.getenv("RULE_RETENTION_DAYS", str(DEFAULT_RETENTION_DAYS)))
     max_count = int(os.getenv("RULE_MAX_COUNT", str(DEFAULT_MAX_RULE_COUNT)))
+    rules = rule_store.list_rules()
+    rule_packages = {r["rule_id"]: r.get("package") for r in rules}
     rule_ids = select_prunable_rules(
-        rule_store.list_rules(),
+        rules,
         now=now,
         retention_days=retention_days,
         max_count=max_count,
     )
     for rule_id in rule_ids:
-        rule_store.delete_rule(rule_id)
+        rule_store.delete_rule(rule_id, package=rule_packages.get(rule_id))
     if rule_ids:
         logger.info("low-usage rules pruned", extra={"count": len(rule_ids)})
     return len(rule_ids)

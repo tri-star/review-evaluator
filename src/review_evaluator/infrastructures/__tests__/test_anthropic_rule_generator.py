@@ -69,6 +69,26 @@ def test_extract_rules_returns_empty_on_refusal(
     assert result == []
 
 
+def test_extract_rules_returns_empty_on_invalid_json(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def urlopen(request: Any, timeout: int = 0) -> Any:
+        body = json.dumps(
+            {
+                "stop_reason": "max_tokens",
+                "content": [{"type": "text", "text": '{"decisions": [{"action":'}],
+            }
+        ).encode("utf-8")
+        return _FakeResponse(body)
+
+    monkeypatch.setattr("urllib.request.urlopen", urlopen)
+
+    generator = AnthropicRuleGenerator(api_key="sk-test")
+    result = generator.extract_rules(comments=[{"body": "x"}], existing_rules=[])
+
+    assert result == []
+
+
 class _FakeResponse:
     def __init__(self, body: bytes) -> None:
         self._buffer = BytesIO(body)

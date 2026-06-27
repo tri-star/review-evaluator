@@ -243,3 +243,87 @@ def test_no_candidates_skips_generator() -> None:
 
     assert result["candidate_comments"] == 0
     assert generator.calls == []
+
+
+def test_reuse_decision_calls_append_usage() -> None:
+    github_client = FakeGitHubClient(
+        issue_comments=[
+            {
+                "body": "これは既存ルールと同じ指摘になりますね、注意してください。",
+                "user": {"login": "alice", "type": "User"},
+            }
+        ],
+        review_comments=[],
+    )
+    store = FakeRuleStore(rules=[{"rule_id": "existing-1", "name": "x/y"}])
+    service = _service(
+        github_client=github_client,
+        rule_store=store,
+        decisions=[{"action": "reuse", "rule_id": "existing-1"}],
+    )
+
+    service.handle(repo="owner/repo", pr_number=1)
+
+    assert ("existing-1", "2026-06-25T00:00:00+00:00") in store.usage
+
+
+def test_reuse_decision_without_rule_id_does_not_call_append_usage() -> None:
+    github_client = FakeGitHubClient(
+        issue_comments=[
+            {
+                "body": "これは既存ルールと同じ指摘になりますね、注意してください。",
+                "user": {"login": "alice", "type": "User"},
+            }
+        ],
+        review_comments=[],
+    )
+    store = FakeRuleStore()
+    service = _service(
+        github_client=github_client,
+        rule_store=store,
+        decisions=[{"action": "reuse"}],
+    )
+
+    result = service.handle(repo="owner/repo", pr_number=1)
+
+    assert result["reused_rules"] == 1
+    assert store.usage == []
+
+
+def test_duplicate_create_decisions_save_only_first() -> None:
+    github_client = FakeGitHubClient(
+        issue_comments=[
+            {
+                "body": "Controllerにロジックを書かないでください。Service層へ移動を。",
+                "user": {"login": "alice", "type": "User"},
+            }
+        ],
+        review_comments=[],
+    )
+    store = FakeRuleStore()
+    service = _service(
+        github_client=github_client,
+        rule_store=store,
+        decisions=[
+            {
+                "action": "create",
+                "name": "controller/layer-violation",
+                "package": "backend",
+                "category": "code-quality",
+                "body": "Controller層にビジネスロジックを書かない。",
+            },
+            {
+                "action": "create",
+                "name": "controller/layer-violation",
+                "package": "backend",
+                "category": "code-quality",
+                "body": "Controller層にビジネスロジックを書かない（重複）。",
+            },
+        ],
+    )
+
+    result = service.handle(repo="owner/repo", pr_number=1)
+
+    assert result["created_rules"] == 1
+    assert len(store.saved) == 1
+    assert store.saved[0]["body"] == "Controller層にビジネスロジックを書かない。"

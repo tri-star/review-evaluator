@@ -215,15 +215,27 @@ class RuleExtractionService:
 
         created = 0
         reused = 0
+        saved_keys: set[tuple[str, str]] = set()
         for decision in decisions:
             action = decision.get("action")
             if action == "reuse":
+                rule_id = decision.get("rule_id")
+                if rule_id:
+                    self.rule_store.append_usage(rule_id=rule_id, used_at=self._now())
                 reused += 1
                 continue
             if action == "create":
                 rule = self._build_rule(decision)
                 if rule is None:
                     continue
+                key = (rule["name"], rule["package"])
+                if key in saved_keys:
+                    logger.warning(
+                        "duplicate rule create skipped",
+                        extra={"rule_name": rule["name"], "package": rule["package"]},
+                    )
+                    continue
+                saved_keys.add(key)
                 self.rule_store.save_rule(rule)
                 created += 1
                 logger.info(
