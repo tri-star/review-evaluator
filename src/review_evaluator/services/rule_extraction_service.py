@@ -160,13 +160,17 @@ class RuleExtractionService:
             The number of usage timestamps appended.
         """
         used_at = self._now()
-        updates = 0
+        seen: set[str] = set()
+        unique_ids: list[str] = []
         for comment in comments:
             body = str(comment.get("body") or "")
             for rule_id in MARKER_PATTERN.findall(body):
-                self.rule_store.append_usage(rule_id=rule_id, used_at=used_at)
-                updates += 1
-        return updates
+                if rule_id not in seen:
+                    seen.add(rule_id)
+                    unique_ids.append(rule_id)
+        for rule_id in unique_ids:
+            self.rule_store.append_usage(rule_id=rule_id, used_at=used_at)
+        return len(unique_ids)
 
     def _candidate_comments(
         self, comments: list[dict[str, Any]]

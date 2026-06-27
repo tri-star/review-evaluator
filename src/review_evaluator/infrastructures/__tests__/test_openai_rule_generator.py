@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import urllib.error
 from io import BytesIO
 from typing import Any
 
@@ -97,6 +98,25 @@ def test_extract_rules_returns_empty_on_invalid_json(
     result = generator.extract_rules(comments=[{"body": "x"}], existing_rules=[])
 
     assert result == []
+
+
+def test_request_raises_runtime_error_on_http_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def urlopen(request: Any, timeout: int = 0) -> Any:
+        raise urllib.error.HTTPError(
+            url="https://api.openai.com/v1/chat/completions",
+            code=401,
+            msg="Unauthorized",
+            hdrs=None,  # type: ignore[arg-type]
+            fp=BytesIO(b'{"error": {"message": "Invalid API key"}}'),
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", urlopen)
+
+    generator = OpenAIRuleGenerator(api_key="sk-bad")
+    with pytest.raises(RuntimeError, match="401"):
+        generator.extract_rules(comments=[{"body": "x"}], existing_rules=[])
 
 
 class _FakeResponse:

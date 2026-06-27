@@ -267,6 +267,29 @@ def test_reuse_decision_calls_append_usage() -> None:
     assert ("existing-1", "2026-06-25T00:00:00+00:00") in store.usage
 
 
+def test_duplicate_rule_markers_record_usage_once() -> None:
+    github_client = FakeGitHubClient(
+        issue_comments=[
+            {
+                "body": "こちら確認してください <!-- RuleId: rule-x -->",
+                "user": {"login": "alice", "type": "User"},
+            },
+            {
+                "body": "同じルールです <!-- RuleId: rule-x -->",
+                "user": {"login": "bob", "type": "User"},
+            },
+        ],
+        review_comments=[],
+    )
+    store = FakeRuleStore()
+    service = _service(github_client=github_client, rule_store=store, decisions=[])
+
+    result = service.handle(repo="owner/repo", pr_number=1)
+
+    assert result["usage_updates"] == 1
+    assert store.usage == [("rule-x", "2026-06-25T00:00:00+00:00")]
+
+
 def test_reuse_decision_without_rule_id_does_not_call_append_usage() -> None:
     github_client = FakeGitHubClient(
         issue_comments=[

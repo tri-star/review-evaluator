@@ -95,7 +95,7 @@ class AnthropicRuleGenerator:
                 "Anthropic API error",
                 extra={"status": error.code, "detail": detail[:500]},
             )
-            raise
+            raise RuntimeError(f"{error.code}: {detail[:500]}") from error
         except urllib.error.URLError as error:
             logger.warning(
                 "Anthropic API network error", extra={"reason": str(error.reason)}

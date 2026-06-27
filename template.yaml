@@ -143,7 +143,7 @@ Resources:
   RuleExtractionQueue:
     Type: AWS::SQS::Queue
     Properties:
-      VisibilityTimeout: 180
+      VisibilityTimeout: 1080
       RedrivePolicy:
         deadLetterTargetArn: !GetAtt RuleExtractionDLQ.Arn
         maxReceiveCount: 3

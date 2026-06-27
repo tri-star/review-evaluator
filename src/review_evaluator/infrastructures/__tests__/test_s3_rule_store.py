@@ -4,6 +4,7 @@ import io
 import json
 from typing import Any
 
+from botocore.exceptions import ClientError
 from infrastructures.s3_rule_store import S3RuleStore
 
 
@@ -38,6 +39,13 @@ class FakeS3Client:
     def delete_object(self, *, Bucket: str, Key: str) -> None:
         self.deleted.append(Key)
         self.objects.pop(Key, None)
+
+    def head_object(self, Bucket: str, Key: str) -> dict[str, Any]:
+        if Key not in self.objects:
+            raise ClientError(
+                {"Error": {"Code": "404", "Message": "Not Found"}}, "HeadObject"
+            )
+        return {}
 
 
 def test_save_rule_は_package_配下に_rule_id_でjson保存する() -> None:
@@ -127,3 +135,28 @@ def test_delete_rule_with_package_skips_prefix_scan() -> None:
 
     assert scan_calls == []
     assert s3_client.deleted == ["rules/package=backend/r10.json"]
+
+
+def test_find_rule_key_uses_head_object_not_scan() -> None:
+    """_find_rule_key は list_objects_v2 スキャンを行わず head_object を使う。"""
+    scan_calls: list[str] = []
+
+    class TrackingScanClient(FakeS3Client):
+        def get_paginator(self, name: str) -> FakePaginator:
+            scan_calls.append(name)
+            return super().get_paginator(name)
+
+    s3_client = TrackingScanClient(
+        objects={
+            "rules/package=backend/r11.json": json.dumps(
+                {"rule_id": "r11", "package": "backend", "recent_usage": []}
+            )
+        }
+    )
+    store = S3RuleStore(s3_client=s3_client, bucket="bucket")
+
+    store.append_usage(rule_id="r11", used_at="t1")
+
+    assert scan_calls == []
+    saved = json.loads(s3_client.objects["rules/package=backend/r11.json"])
+    assert saved["recent_usage"] == ["t1"]

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from botocore.exceptions import ClientError
 from observability import logger
 
 
@@ -131,14 +132,14 @@ class S3RuleStore:
         return f"{RULES_PREFIX}package={package}/{rule_id}.json"
 
     def _find_rule_key(self, rule_id: str) -> str | None:
-        """Locate the S3 key for a rule id by scanning the rules prefix."""
-        suffix = f"/{rule_id}.json"
-        paginator = self.s3_client.get_paginator("list_objects_v2")
-        for page in paginator.paginate(Bucket=self.bucket, Prefix=RULES_PREFIX):
-            for content in page.get("Contents", []):
-                key = content["Key"]
-                if key.endswith(suffix):
-                    return key
+        """Locate the S3 key for a rule id by checking each known package directly."""
+        for package in ("frontend", "backend"):
+            key = self._rule_key(package, rule_id)
+            try:
+                self.s3_client.head_object(Bucket=self.bucket, Key=key)
+                return key
+            except ClientError:
+                continue
         return None
 
     def _read_rule(self, key: str) -> dict[str, Any]:

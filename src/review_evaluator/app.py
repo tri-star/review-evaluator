@@ -178,7 +178,14 @@ def process_rule_extraction(event: dict[str, Any], context: Any) -> dict[str, An
     records = event.get("Records", [])
     for record in records:
         body = json.loads(record["body"])
-        service.handle(repo=body["repo"], pr_number=int(body["pr_number"]))
+        repo = body.get("repo")
+        pr_number = body.get("pr_number")
+        if not repo or pr_number is None:
+            logger.warning(
+                "malformed SQS record skipped", extra={"body": str(body)[:200]}
+            )
+            continue
+        service.handle(repo=repo, pr_number=int(pr_number))
     logger.info("rule extraction batch complete", extra={"records": len(records)})
     return {"processed": len(records)}
 
